@@ -1,6 +1,6 @@
 import { createNewGame, migrateState } from './state.js';
 
-const KEY = 'liga-simulator-v2-save';
+const KEY = 'liga-simulator-v3-save';
 
 export function saveGame(state) {
   localStorage.setItem(KEY, JSON.stringify(state));
@@ -46,7 +46,7 @@ export function importGame(file) {
         if (!migrated) throw new Error('Partida incompatible');
         resolve(migrated);
       } catch {
-        reject(new Error('JSON inválido o incompatible con v2'));
+        reject(new Error('JSON inválido o incompatible con v3'));
       }
     };
     reader.onerror = () => reject(new Error('No se pudo leer el archivo'));

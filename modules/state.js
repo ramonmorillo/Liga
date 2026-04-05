@@ -5,12 +5,59 @@ import { competitions } from '../data/trophies.js';
 import { generateDoubleRoundRobin } from './scheduler.js';
 import { autoPickLineup } from './lineups.js';
 
-export const CURRENT_STATE_VERSION = 2;
+export const CURRENT_STATE_VERSION = 3;
 const START_YEAR = 2026;
 
 const squadShape = [...Array(3).fill('POR'), ...Array(8).fill('DEF'), ...Array(8).fill('MED'), ...Array(5).fill('DEL')];
 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
+
+const moodScale = ['eufórica', 'contenta', 'expectante', 'inquieta', 'enfadada', 'muy enfadada'];
+const coachStyles = ['posesión ofensiva', 'bloque medio', 'pressing intenso', 'transiciones rápidas', 'defensa táctica'];
+const shirtPatterns = ['Liso', 'Rayas', 'Bandas', 'Mitad y mitad'];
+const stadiumSuffix = ['Arena', 'Stadium', 'Parque', 'Coliseo', 'Metropolitano', 'Olímpico'];
+
+function splitClubName(name) {
+  return name.replace(/^(Real|Club Deportivo|Atlético|Sporting|Deportivo|Unión|CF|FC|CD|Inter|Racing)\s+/i, '').trim();
+}
+
+function createCoach() {
+  const pools = namePools.España;
+  return {
+    name: `${pick(pools.first)} ${pick(pools.last)}`,
+    age: rand(38, 67),
+    style: pick(coachStyles),
+    rating: rand(60, 88),
+    profile: 'Entrenador con enfoque competitivo y gestión de vestuario.',
+    status: 'estable',
+    pressure: 0,
+    changes: [],
+  };
+}
+
+function createIdentity(raw, division) {
+  const root = splitClubName(raw.name);
+  return {
+    stadium: {
+      name: `${root} ${pick(stadiumSuffix)}`,
+      capacity: rand(division === 1 ? 28000 : 14000, division === 1 ? 76000 : 36000),
+      seasonAttendanceTotal: 0,
+      seasonHomeMatches: 0,
+      lastAttendance: null,
+      lastOccupancy: null,
+    },
+    fanMood: 'expectante',
+    supporterMomentum: 0,
+    crest: {
+      shape: pick(['shield', 'round', 'diamond']),
+      symbol: root[0]?.toUpperCase() || raw.name[0].toUpperCase(),
+    },
+    kits: {
+      primary: { pattern: pick(shirtPatterns), colors: [raw.colors[0], raw.colors[1] || '#ffffff'] },
+      away: { pattern: pick(shirtPatterns), colors: [raw.colors[1] || '#f3f4f6', raw.colors[0]] },
+    },
+  };
+}
 
 function createPlayer(teamId, idx, position, base, nonEuRemaining, age = rand(17, 35)) {
   const isNonEu = nonEuRemaining > 0 && Math.random() < 0.14;
@@ -54,11 +101,14 @@ function setupTeam(raw, idx, division) {
     prestige: raw.prestige,
     strength: raw.strength,
     budget: raw.budget * 1000000,
+    finances: { transferIn: 0, transferOut: 0, prizes: 0 },
     squad: [],
     tactics: { formation: '4-3-3' },
     lineup: { formation: '4-3-3', starters: [], bench: [] },
     seasonStats: { points: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, gd: 0 },
     trophies: {},
+    coach: createCoach(),
+    ...createIdentity(raw, division),
   };
 
   let nonEuLeft = 3;
@@ -107,6 +157,11 @@ export function createNewGame() {
     results: { d1: {}, d2: {} },
     userTeamId: firstDivision[0].id,
     transferWindow: 'summer',
+    transferHistory: [],
+    recentNews: [],
+    matchdaySummaries: [],
+    selectedTeamId: firstDivision[0].id,
+    selectedMatchKey: null,
     history: {
       seasons: [],
       clubTitles: {},
@@ -114,9 +169,13 @@ export function createNewGame() {
       topScorers: [],
       trophies: competitions,
       europe: [],
+      matchdays: [],
+      transfersBySeason: {},
+      coachChanges: [],
     },
     europeSlots: { champions: [], cupWinners: [], continental2: [] },
     cup: { championTeamId: null, runnerUpTeamId: null, rounds: [] },
+    tournaments: {},
     lastSeasonSummary: null,
   };
 
@@ -140,12 +199,43 @@ export function getTeamById(state, teamId) {
   return allTeams(state).find((team) => team.id === teamId);
 }
 
+function enrichLegacyState(raw) {
+  raw.transferHistory = raw.transferHistory || [];
+  raw.recentNews = raw.recentNews || [];
+  raw.matchdaySummaries = raw.matchdaySummaries || [];
+  raw.selectedTeamId = raw.selectedTeamId || raw.userTeamId;
+  raw.history = raw.history || {};
+  raw.history.matchdays = raw.history.matchdays || [];
+  raw.history.transfersBySeason = raw.history.transfersBySeason || {};
+  raw.history.coachChanges = raw.history.coachChanges || [];
+  raw.tournaments = raw.tournaments || {};
+
+  allTeams(raw).forEach((team) => {
+    if (!team.finances) team.finances = { transferIn: 0, transferOut: 0, prizes: 0 };
+    if (!team.coach) team.coach = createCoach();
+    if (!team.stadium || !team.kits || !team.crest) {
+      const identity = createIdentity(team, team.division || 1);
+      team.stadium = team.stadium || identity.stadium;
+      team.kits = team.kits || identity.kits;
+      team.crest = team.crest || identity.crest;
+      team.fanMood = team.fanMood || identity.fanMood;
+      team.supporterMomentum = team.supporterMomentum || 0;
+    }
+    if (!team.coach.changes) team.coach.changes = [];
+    if (!team.coach.status) team.coach.status = 'estable';
+    if (!team.coach.pressure) team.coach.pressure = 0;
+  });
+
+  raw.version = CURRENT_STATE_VERSION;
+  return raw;
+}
+
 export function migrateState(raw) {
   if (!raw || typeof raw !== 'object') return null;
   if (raw.version === CURRENT_STATE_VERSION) return raw;
 
-  if (raw.firstDivision && raw.secondDivision && raw.schedule && raw.standings) {
-    return createNewGame();
+  if (raw.firstDivision && raw.secondDivision) {
+    return enrichLegacyState(raw);
   }
 
   return null;
@@ -153,6 +243,14 @@ export function migrateState(raw) {
 
 export function resetSeasonStats(team) {
   team.seasonStats = { points: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, gd: 0 };
+  team.stadium.seasonAttendanceTotal = 0;
+  team.stadium.seasonHomeMatches = 0;
+  team.stadium.lastAttendance = null;
+  team.stadium.lastOccupancy = null;
+  team.finances.transferIn = 0;
+  team.finances.transferOut = 0;
+  team.finances.prizes = 0;
+
   team.squad.forEach((player) => {
     player.seasonGoals = 0;
     player.seasonConceded = 0;
@@ -188,4 +286,13 @@ export function ageAndEvolveSquads(state) {
 
     team.lineup = autoPickLineup(team, team.tactics.formation);
   });
+}
+
+export function moodFromMomentum(momentum) {
+  if (momentum >= 36) return moodScale[0];
+  if (momentum >= 18) return moodScale[1];
+  if (momentum >= 0) return moodScale[2];
+  if (momentum >= -16) return moodScale[3];
+  if (momentum >= -34) return moodScale[4];
+  return moodScale[5];
 }

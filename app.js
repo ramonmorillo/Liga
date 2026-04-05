@@ -35,7 +35,8 @@ function repaint() {
 function runSimulation() {
   const output = simulateMatchday(app.state);
   if (output.done) app.view = views.endSeason;
-  alert(output.message);
+  else app.view = views.matchday;
+  alert(output.summary ? `${output.message}. Partido destacado: ${output.summary.bigMatch}` : output.message);
   repaint();
 }
 
@@ -52,6 +53,14 @@ function bindViewActions() {
     button.addEventListener('click', () => {
       app.state.selectedTeamId = button.dataset.team;
       app.view = views.teamDetail;
+      repaint();
+    });
+  });
+
+  root.querySelectorAll('[data-action="open-match"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      app.state.selectedMatchKey = button.dataset.match;
+      app.view = views.matchDetail;
       repaint();
     });
   });

@@ -39,6 +39,23 @@ export function getMarketPlayers(state, filters = {}) {
   });
 }
 
+function recordMovement(state, payload) {
+  state.transferHistory.unshift(payload);
+  state.transferHistory = state.transferHistory.slice(0, 220);
+}
+
+function asNews(state, message, importance = 'media') {
+  state.recentNews.unshift({
+    season: state.season,
+    matchday: state.currentMatchday,
+    type: 'transfer',
+    text: message,
+    importance,
+    dateLabel: `Temporada ${state.season} · Jornada ${state.currentMatchday}`,
+  });
+  state.recentNews = state.recentNews.slice(0, 120);
+}
+
 export function transferPlayer(state, fromTeamId, toTeamId, playerId, payClause = false) {
   const fromTeam = getTeamById(state, fromTeamId);
   const toTeam = getTeamById(state, toTeamId);
@@ -57,10 +74,30 @@ export function transferPlayer(state, fromTeamId, toTeamId, playerId, payClause 
 
   toTeam.budget -= transferFee;
   fromTeam.budget += transferFee;
+  toTeam.finances.transferOut += transferFee;
+  fromTeam.finances.transferIn += transferFee;
 
   fromTeam.squad = fromTeam.squad.filter((item) => item.id !== playerId);
   toTeam.squad.push(player);
   player.history.clubs.push(toTeam.id);
+
+  const movement = {
+    season: state.season,
+    window: state.transferWindow,
+    playerName: `${player.name} ${player.surname}`,
+    fromTeamId: fromTeam.id,
+    fromTeamName: fromTeam.name,
+    toTeamId: toTeam.id,
+    toTeamName: toTeam.name,
+    fee: transferFee,
+    clauseExecuted: payClause,
+    notable: transferFee > 22000000 || payClause,
+  };
+  recordMovement(state, movement);
+
+  if (movement.notable) {
+    asNews(state, `${movement.playerName} ficha por ${toTeam.name} por ${transferFee.toLocaleString('es-ES')}€${payClause ? ' (cláusula)' : ''}.`, 'alta');
+  }
 
   return {
     ok: true,
