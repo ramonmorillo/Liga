@@ -2,7 +2,7 @@ import { render, renderNav, views } from './modules/ui.js';
 import { clearGame, ensureGame, exportGame, importGame, saveGame } from './modules/storage.js';
 import { autoPickLineup } from './modules/lineups.js';
 import { allTeams, createNewGame, getTeamById } from './modules/state.js';
-import { simulateMatchday } from './modules/seasonEngine.js';
+import { initializeSeasonStructures, simulateMatchday } from './modules/seasonEngine.js';
 import { transferPlayer } from './modules/transfers.js';
 
 const app = {
@@ -10,6 +10,8 @@ const app = {
   state: ensureGame(),
   marketFilters: {},
 };
+
+initializeSeasonStructures(app.state);
 
 const root = document.getElementById('view-root');
 const nav = document.getElementById('main-nav');
@@ -19,7 +21,7 @@ const statusLabel = document.getElementById('status-label');
 
 function repaint() {
   seasonLabel.textContent = `Temporada ${app.state.season} · Año ${app.state.year}`;
-  matchdayLabel.textContent = `Jornada ${app.state.currentMatchday}/${app.state.maxMatchday}`;
+  matchdayLabel.textContent = `Semana ${app.state.currentMatchday}/${app.state.maxMatchday}`;
   statusLabel.textContent = `Mercado: ${app.state.transferWindow}`;
 
   renderNav(nav, app.view, (view) => {
@@ -59,8 +61,16 @@ function bindViewActions() {
 
   root.querySelectorAll('[data-action="open-match"]').forEach((button) => {
     button.addEventListener('click', () => {
-      app.state.selectedMatchKey = button.dataset.match;
+      app.state.selectedMatchId = button.dataset.match;
       app.view = views.matchDetail;
+      repaint();
+    });
+  });
+
+  root.querySelectorAll('[data-action="calendar-week"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      app.state.selectedCalendarWeek = Number(button.dataset.week);
+      app.view = views.calendar;
       repaint();
     });
   });
@@ -110,6 +120,7 @@ document.getElementById('btn-new-game').addEventListener('click', () => {
   if (!confirm('¿Seguro que quieres reiniciar la partida?')) return;
   clearGame();
   app.state = createNewGame();
+  initializeSeasonStructures(app.state);
   app.view = views.dashboard;
   repaint();
 });
@@ -120,6 +131,7 @@ document.getElementById('import-file').addEventListener('change', async (event) 
   if (!file) return;
   try {
     app.state = await importGame(file);
+    initializeSeasonStructures(app.state);
     alert('Partida importada correctamente');
     repaint();
   } catch (error) {
