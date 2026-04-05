@@ -100,7 +100,7 @@ function createInjuryEvents(team, lineup, side) {
   const events = [];
   for (let i = 0; i < injuryCount; i += 1) {
     const player = bag[Math.floor(Math.random() * bag.length)];
-    events.push({ type: 'injury', side, minute: generateMinute(), playerId: player.id, playerName: `${player.name} ${player.surname}`, text: `Lesión de ${player.name} ${player.surname}` });
+    events.push({ type: 'injury', side, minute: generateMinute(), playerId: player.id, playerName: `${player.name} ${player.surname}`, severity: ['leve', 'moderada', 'grave'][ri(0, 2)], text: `Lesión de ${player.name} ${player.surname}` });
   }
   return events;
 }

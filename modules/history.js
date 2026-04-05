@@ -1,8 +1,23 @@
 import { allTeams } from './state.js';
 
-export function registerTeamTitle(state, teamId, titleKey) {
+export function registerTeamTitle(state, teamId, titleKey, season = state.season) {
   const key = `${teamId}:${titleKey}`;
   state.history.clubTitles[key] = (state.history.clubTitles[key] || 0) + 1;
+  state.history.clubTitleLog.push({ season, teamId, titleKey });
+}
+
+export function registerClubSeasonSnapshot(state, team, row, season, year) {
+  if (!team || !row) return;
+  state.history.clubSeasonStats[team.id] = state.history.clubSeasonStats[team.id] || [];
+  state.history.clubSeasonStats[team.id].push({
+    season,
+    year,
+    division: team.division,
+    position: row.position,
+    points: row.points,
+    gf: row.gf,
+    ga: row.ga,
+  });
 }
 
 export function archivePlayers(state) {

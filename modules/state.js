@@ -5,7 +5,7 @@ import { competitions } from '../data/trophies.js';
 import { generateDoubleRoundRobin } from './scheduler.js';
 import { autoPickLineup } from './lineups.js';
 
-export const CURRENT_STATE_VERSION = 3;
+export const CURRENT_STATE_VERSION = 4;
 const START_YEAR = 2026;
 
 const squadShape = [...Array(3).fill('POR'), ...Array(8).fill('DEF'), ...Array(8).fill('MED'), ...Array(5).fill('DEL')];
@@ -161,10 +161,15 @@ export function createNewGame() {
     recentNews: [],
     matchdaySummaries: [],
     selectedTeamId: firstDivision[0].id,
-    selectedMatchKey: null,
+    selectedMatchId: null,
+    selectedCalendarWeek: 1,
+    matchArchive: {},
+    seasonCalendar: [],
     history: {
       seasons: [],
       clubTitles: {},
+      clubTitleLog: [],
+      clubSeasonStats: {},
       playerArchive: {},
       topScorers: [],
       trophies: competitions,
@@ -172,10 +177,12 @@ export function createNewGame() {
       matchdays: [],
       transfersBySeason: {},
       coachChanges: [],
+      globalBySeason: [],
     },
     europeSlots: { champions: [], cupWinners: [], continental2: [] },
     cup: { championTeamId: null, runnerUpTeamId: null, rounds: [] },
     tournaments: {},
+    europeExternal: { leagues: [], history: [] },
     lastSeasonSummary: null,
   };
 
@@ -204,11 +211,19 @@ function enrichLegacyState(raw) {
   raw.recentNews = raw.recentNews || [];
   raw.matchdaySummaries = raw.matchdaySummaries || [];
   raw.selectedTeamId = raw.selectedTeamId || raw.userTeamId;
+  raw.selectedMatchId = raw.selectedMatchId || null;
+  raw.selectedCalendarWeek = raw.selectedCalendarWeek || 1;
+  raw.matchArchive = raw.matchArchive || {};
+  raw.seasonCalendar = raw.seasonCalendar || [];
   raw.history = raw.history || {};
   raw.history.matchdays = raw.history.matchdays || [];
   raw.history.transfersBySeason = raw.history.transfersBySeason || {};
   raw.history.coachChanges = raw.history.coachChanges || [];
+  raw.history.clubSeasonStats = raw.history.clubSeasonStats || {};
+  raw.history.clubTitleLog = raw.history.clubTitleLog || [];
+  raw.history.globalBySeason = raw.history.globalBySeason || [];
   raw.tournaments = raw.tournaments || {};
+  raw.europeExternal = raw.europeExternal || { leagues: [], history: [] };
 
   allTeams(raw).forEach((team) => {
     if (!team.finances) team.finances = { transferIn: 0, transferOut: 0, prizes: 0 };

@@ -2,18 +2,15 @@ import { simulateMatch } from './matchEngine.js';
 import { autoPickLineup } from './lineups.js';
 import { sortStandings, getTeamById, resetSeasonStats, ageAndEvolveSquads, allTeams, moodFromMomentum } from './state.js';
 import { getSeasonAwards } from './awards.js';
-import { pushSeasonHistory, registerTeamTitle, archivePlayers } from './history.js';
+import { pushSeasonHistory, registerTeamTitle, archivePlayers, registerClubSeasonSnapshot } from './history.js';
 import { runAiTransferWindow } from './transfers.js';
 import { generateDoubleRoundRobin } from './scheduler.js';
+import { simulateExternalEuropeSeason } from './europe.js';
 
 const coachStates = ['estable', 'observado', 'en peligro', 'destituido'];
 
-const roundsByCompetition = {
-  cup: ['Octavos', 'Cuartos', 'Semifinal', 'Final'],
-  champions: ['Cuartos', 'Semifinal', 'Final'],
-  cupWinners: ['Cuartos', 'Semifinal', 'Final'],
-  continental2: ['Octavos', 'Cuartos', 'Semifinal', 'Final'],
-};
+const cupRounds = ['Octavos', 'Cuartos', 'Semifinal', 'Final'];
+const euroRounds = ['Cuartos', 'Semifinal', 'Final'];
 
 function addNews(state, type, text, importance = 'media') {
   state.recentNews.unshift({
@@ -22,9 +19,130 @@ function addNews(state, type, text, importance = 'media') {
     type,
     text,
     importance,
-    dateLabel: `Temporada ${state.season} · Jornada ${state.currentMatchday}`,
+    dateLabel: `Temporada ${state.season} · Semana ${state.currentMatchday}`,
   });
   state.recentNews = state.recentNews.slice(0, 120);
+}
+
+function createMatchRecord(state, payload) {
+  const id = payload.id || `S${state.season}-W${payload.week}-${payload.competition}-${payload.homeTeamId}-${payload.awayTeamId}-${Math.random().toString(36).slice(2, 6)}`;
+  const record = {
+    id,
+    season: state.season,
+    week: payload.week,
+    matchday: payload.matchday ?? null,
+    division: payload.division || null,
+    competition: payload.competition,
+    competitionLabel: payload.competitionLabel,
+    round: payload.round || null,
+    homeTeamId: payload.homeTeamId,
+    awayTeamId: payload.awayTeamId,
+    homeName: payload.homeName,
+    awayName: payload.awayName,
+    homeGoals: payload.result.homeGoals,
+    awayGoals: payload.result.awayGoals,
+    score: `${payload.result.homeGoals}-${payload.result.awayGoals}`,
+    goals: payload.result.goals || [],
+    cards: payload.result.cards || [],
+    injuries: payload.result.injuries || [],
+    events: payload.result.events || [],
+    stats: {
+      possession: [payload.result.homePossession, payload.result.awayPossession],
+      shots: [payload.result.homeShots, payload.result.awayShots],
+      shotsOnTarget: [payload.result.homeShotsOnTarget, payload.result.awayShotsOnTarget],
+    },
+    mvp: payload.result.mvp,
+    attendance: payload.result.attendance,
+    summaryText: payload.result.summaryText,
+  };
+
+  state.matchArchive[id] = record;
+  return record;
+}
+
+function getCalendarWeek(state, week) {
+  if (!state.seasonCalendar.length) return null;
+  return state.seasonCalendar.find((entry) => entry.week === week) || null;
+}
+
+function createTournamentTemplate(key, title, roundNames, participants, weekMap) {
+  const rounds = roundNames.map((name, idx) => ({
+    round: name,
+    week: weekMap[idx],
+    matches: [],
+    done: false,
+  }));
+  return {
+    key,
+    title,
+    rounds,
+    participants,
+    championTeamId: null,
+    championName: null,
+    currentRound: rounds[0]?.round || null,
+  };
+}
+
+function shuffled(list) {
+  return [...list].sort(() => Math.random() - 0.5);
+}
+
+function buildSeasonCalendar(state) {
+  const weeks = [];
+  for (let week = 1; week <= state.maxMatchday; week += 1) {
+    weeks.push({ week, labels: ['Liga'], competitions: { league: { played: false, matchday: week } }, matches: [] });
+  }
+
+  const cupWeeks = [4, 9, 14, 19];
+  cupWeeks.forEach((week, idx) => {
+    if (!weeks[week - 1]) return;
+    weeks[week - 1].labels.push('Copa');
+    weeks[week - 1].competitions.cup = { played: false, round: cupRounds[idx] };
+  });
+
+  if (state.season > 1) {
+    const c2Weeks = [6, 11, 16, 20];
+    c2Weeks.forEach((week, idx) => {
+      if (!weeks[week - 1]) return;
+      weeks[week - 1].labels.push('Europa');
+      weeks[week - 1].competitions.continental2 = { played: false, round: ['Octavos', ...euroRounds][idx] };
+    });
+    [8, 13, 18].forEach((week, idx) => {
+      if (!weeks[week - 1]) return;
+      weeks[week - 1].labels.push('Europa');
+      weeks[week - 1].competitions.champions = { played: false, round: euroRounds[idx] };
+      weeks[week - 1].competitions.cupWinners = { played: false, round: euroRounds[idx] };
+    });
+  }
+
+  state.seasonCalendar = weeks;
+  state.selectedCalendarWeek = Math.min(state.selectedCalendarWeek || 1, state.maxMatchday);
+}
+
+function setupSeasonTournaments(state) {
+  const cupParticipants = shuffled([...state.firstDivision, ...state.secondDivision]).slice(0, 16);
+  state.tournaments.cup = createTournamentTemplate('cup', 'Copa Nacional', cupRounds, cupParticipants, [4, 9, 14, 19]);
+
+  if (state.season === 1) {
+    state.tournaments.champions = null;
+    state.tournaments.cupWinners = null;
+    state.tournaments.continental2 = null;
+    return;
+  }
+
+  const ext = state.europeExternal?.leagues || [];
+  const extChampions = ext.map((league) => ({ id: `ext:${league.championTeamId}`, name: league.champion }));
+  const extCup = ext.map((league) => ({ id: `ext:${league.cupChampionTeamId}`, name: league.cupChampion }));
+  const extCont = ext.flatMap((league) => league.table.slice(1, 3).map((row) => ({ id: `ext:${row.teamId}`, name: row.teamName })));
+
+  const domestic = state.europeSlots || { champions: [], cupWinners: [], continental2: [] };
+  const championsParticipants = [...domestic.champions, ...extChampions].slice(0, 8);
+  const cupWinnersParticipants = [...domestic.cupWinners, ...extCup].slice(0, 8);
+  const contParticipants = [...domestic.continental2, ...extCont].slice(0, 16);
+
+  state.tournaments.champions = createTournamentTemplate('champions', 'Copa de Campeones', euroRounds, championsParticipants, [8, 13, 18]);
+  state.tournaments.cupWinners = createTournamentTemplate('cupWinners', 'Copa de Campeones de Copa', euroRounds, cupWinnersParticipants, [8, 13, 18]);
+  state.tournaments.continental2 = createTournamentTemplate('continental2', 'Copa Continental Secundaria', ['Octavos', ...euroRounds], contParticipants, [6, 11, 16, 20]);
 }
 
 function applyResult(standings, homeTeam, awayTeam, result) {
@@ -106,34 +224,10 @@ function evaluateCoachStatus(team, standings, state) {
   const was = team.coach.status;
   team.coach.status = status;
 
-  if (was !== status && status !== 'estable') {
-    addNews(state, 'coach-pressure', `${team.name}: ${team.coach.name} está ${status}.`, 'alta');
-  }
-
-  if (status === 'en peligro' && Math.random() < 0.08) {
-    const oldCoach = team.coach.name;
-    team.coach.status = coachStates[3];
-    addNews(state, 'coach-fired', `${team.name} destituye a ${oldCoach} tras la mala dinámica.`, 'alta');
-
-    const newCoachName = `${['Sergio', 'Marcos', 'Adrián', 'Raúl', 'Iván'][Math.floor(Math.random() * 5)]} ${['Romero', 'Vega', 'Herrera', 'Lagos', 'Mena'][Math.floor(Math.random() * 5)]}`;
-    team.coach = {
-      name: newCoachName,
-      age: 40 + Math.floor(Math.random() * 21),
-      style: ['posesión ofensiva', 'pressing intenso', 'transiciones rápidas'][Math.floor(Math.random() * 3)],
-      rating: 62 + Math.floor(Math.random() * 19),
-      profile: 'Nuevo técnico nombrado para reconducir la temporada.',
-      status: 'observado',
-      pressure: 12,
-      changes: team.coach.changes || [],
-    };
-
-    team.coach.changes.push({ season: state.season, matchday: state.currentMatchday, out: oldCoach, in: newCoachName });
-    state.history.coachChanges.push({ season: state.season, matchday: state.currentMatchday, teamName: team.name, out: oldCoach, in: newCoachName });
-    addNews(state, 'coach-hired', `${team.name} incorpora a ${newCoachName} como nuevo entrenador.`, 'media');
-  }
+  if (was !== status && status !== 'estable') addNews(state, 'coach-pressure', `${team.name}: ${team.coach.name} está ${status}.`, 'alta');
 }
 
-function buildDivisionMatchday(state, divisionKey) {
+function playLeagueWeek(state, divisionKey, weekEntry) {
   const schedule = divisionKey === 'd1' ? state.firstSchedule : state.secondSchedule;
   const standings = divisionKey === 'd1' ? state.firstStandings : state.secondStandings;
   const teams = divisionKey === 'd1' ? state.firstDivision : state.secondDivision;
@@ -154,17 +248,22 @@ function buildDivisionMatchday(state, divisionKey) {
     if (!awayTeam.lineup?.starters?.length) awayTeam.lineup = autoPickLineup(awayTeam, awayTeam.tactics.formation);
 
     const result = simulateMatch(homeTeam, awayTeam, homeTeam.lineup, awayTeam.lineup, { competitionLabel: 'Liga' });
-    state.results[divisionKey][state.currentMatchday][key] = result;
-    applyResult(standings, homeTeam, awayTeam, result);
+    const record = createMatchRecord(state, {
+      week: state.currentMatchday,
+      matchday: state.currentMatchday,
+      division: divisionKey,
+      competition: 'league',
+      competitionLabel: divisionKey === 'd1' ? 'Liga Primera' : 'Liga Segunda',
+      homeTeamId: homeTeam.id,
+      awayTeamId: awayTeam.id,
+      homeName: homeTeam.name,
+      awayName: awayTeam.name,
+      result,
+    });
 
-    homeTeam.squad.forEach((player) => {
-      if (homeTeam.lineup.starters.includes(player.id)) player.energy = Math.max(40, player.energy - 8);
-      else player.energy = Math.min(100, player.energy + 4);
-    });
-    awayTeam.squad.forEach((player) => {
-      if (awayTeam.lineup.starters.includes(player.id)) player.energy = Math.max(40, player.energy - 8);
-      else player.energy = Math.min(100, player.energy + 4);
-    });
+    state.results[divisionKey][state.currentMatchday][key] = { ...result, matchId: record.id };
+    applyResult(standings, homeTeam, awayTeam, result);
+    weekEntry.matches.push(record.id);
 
     report.push({
       key,
@@ -180,87 +279,90 @@ function buildDivisionMatchday(state, divisionKey) {
       mvp: result.mvp,
       attendance: result.attendance,
     });
-
-    if (Math.abs(result.homeGoals - result.awayGoals) >= 4) {
-      addNews(state, 'big-win', `${homeTeam.name} ${result.homeGoals}-${result.awayGoals} ${awayTeam.name}: triunfo contundente.`, 'media');
-    }
-    result.injuries.forEach((injury) => addNews(state, 'injury', `${injury.playerName} (${injury.side === 'home' ? homeTeam.name : awayTeam.name}) cayó lesionado al ${injury.minute}'.`, 'media'));
   });
 
   sortStandings(standings);
   teams.forEach((team) => evaluateCoachStatus(team, standings, state));
-
   return report;
 }
 
-function makeKnockoutTournament(state, key, title, teams, doubleLeg = false) {
-  const sortedTeams = [...teams].sort((a, b) => b.strength + b.prestige - (a.strength + a.prestige));
-  const rounds = roundsByCompetition[key];
-  let alive = sortedTeams;
-  const bracket = [];
+function getTournamentTeam(state, ref) {
+  if (!ref) return null;
+  if (ref.id?.startsWith('ext:')) return { id: ref.id, name: ref.name, strength: 72, prestige: 66, lineup: { starters: [], bench: [] }, squad: [] };
+  return getTeamById(state, ref.id);
+}
 
-  rounds.forEach((roundName, idx) => {
-    if (alive.length < 2) return;
-    const roundMatches = [];
-    for (let i = 0; i < alive.length; i += 2) {
-      const home = alive[i];
-      const away = alive[i + 1] || alive[i];
-      const firstLeg = simulateMatch(home, away, home.lineup, away.lineup, { competitionLabel: title });
-      let aggregateHome = firstLeg.homeGoals;
-      let aggregateAway = firstLeg.awayGoals;
-      let secondLeg = null;
+function playTournamentRound(state, tournament, weekEntry) {
+  if (!tournament) return;
+  const round = tournament.rounds.find((item) => item.week === state.currentMatchday && !item.done);
+  if (!round) return;
 
-      if (doubleLeg && roundName !== 'Final') {
-        secondLeg = simulateMatch(away, home, away.lineup, home.lineup, { competitionLabel: title });
-        aggregateHome += secondLeg.awayGoals;
-        aggregateAway += secondLeg.homeGoals;
-      }
+  const previousRound = tournament.rounds[tournament.rounds.indexOf(round) - 1];
+  let entrants = previousRound?.winners || tournament.participants;
+  entrants = entrants.filter(Boolean);
+  entrants = shuffled(entrants);
 
-      const winner = aggregateHome === aggregateAway
-        ? (Math.random() < 0.5 ? home : away)
-        : aggregateHome > aggregateAway
-          ? home
-          : away;
-
-      roundMatches.push({
-        homeTeamId: home.id,
-        awayTeamId: away.id,
-        homeName: home.name,
-        awayName: away.name,
-        firstLeg: `${firstLeg.homeGoals}-${firstLeg.awayGoals}`,
-        secondLeg: secondLeg ? `${secondLeg.homeGoals}-${secondLeg.awayGoals}` : null,
-        aggregate: `${aggregateHome}-${aggregateAway}`,
-        winnerId: winner.id,
-        winnerName: winner.name,
-      });
+  const winners = [];
+  const matches = [];
+  for (let i = 0; i < entrants.length; i += 2) {
+    const homeRef = entrants[i];
+    const awayRef = entrants[i + 1];
+    if (!awayRef) {
+      winners.push(homeRef);
+      continue;
     }
-    bracket.push({ round: roundName, matches: roundMatches });
-    alive = roundMatches.map((item) => getTeamById(state, item.winnerId));
 
-    if (idx === rounds.length - 1 && alive[0]) {
-      addNews(state, 'title', `${alive[0].name} conquista ${title}.`, 'alta');
-    }
-  });
+    const homeTeam = getTournamentTeam(state, homeRef);
+    const awayTeam = getTournamentTeam(state, awayRef);
+    const homeLineup = homeTeam?.lineup?.starters?.length ? homeTeam.lineup : { starters: [], bench: [] };
+    const awayLineup = awayTeam?.lineup?.starters?.length ? awayTeam.lineup : { starters: [], bench: [] };
 
-  return {
-    key,
-    title,
-    currentRound: bracket[bracket.length - 1]?.round || rounds[0],
-    championTeamId: alive[0]?.id || null,
-    championName: alive[0]?.name || null,
-    rounds: bracket,
-  };
+    const result = simulateMatch(homeTeam, awayTeam, homeLineup, awayLineup, { competitionLabel: tournament.title });
+    const winnerRef = result.homeGoals === result.awayGoals ? (Math.random() < 0.5 ? homeRef : awayRef) : result.homeGoals > result.awayGoals ? homeRef : awayRef;
+    winners.push(winnerRef);
+
+    const record = createMatchRecord(state, {
+      week: state.currentMatchday,
+      competition: tournament.key,
+      competitionLabel: tournament.title,
+      round: round.round,
+      homeTeamId: homeRef.id,
+      awayTeamId: awayRef.id,
+      homeName: homeRef.name,
+      awayName: awayRef.name,
+      result,
+    });
+
+    weekEntry.matches.push(record.id);
+    matches.push({
+      matchId: record.id,
+      homeTeamId: homeRef.id,
+      awayTeamId: awayRef.id,
+      homeName: homeRef.name,
+      awayName: awayRef.name,
+      score: `${result.homeGoals}-${result.awayGoals}`,
+      winnerId: winnerRef.id,
+      winnerName: winnerRef.name,
+    });
+  }
+
+  round.matches = matches;
+  round.winners = winners;
+  round.done = true;
+  tournament.currentRound = round.round;
+
+  if (winners.length === 1) {
+    tournament.championTeamId = winners[0].id;
+    tournament.championName = winners[0].name;
+    addNews(state, 'title', `${winners[0].name} conquista ${tournament.title}.`, 'alta');
+  }
 }
 
 function registerMatchdaySummary(state, allReports) {
   const topScorers = allReports.flatMap((game) => game.topScorers).slice(0, 12);
   const injuries = allReports.flatMap((game) => game.injuries).slice(0, 8);
   const cards = allReports.flatMap((game) => game.cards).slice(0, 8);
-  const bigMatch = [...allReports].sort((a, b) => {
-    const ia = (a.attendance?.occupancy || 0) + a.topScorers.length * 6;
-    const ib = (b.attendance?.occupancy || 0) + b.topScorers.length * 6;
-    return ib - ia;
-  })[0];
+  const bigMatch = [...allReports].sort((a, b) => ((b.attendance?.occupancy || 0) + b.topScorers.length * 6) - ((a.attendance?.occupancy || 0) + a.topScorers.length * 6))[0];
   const standoutPlayer = topScorers[0]?.name || allReports[0]?.mvp || 'Sin destacar';
 
   const summary = {
@@ -276,24 +378,51 @@ function registerMatchdaySummary(state, allReports) {
 
   state.matchdaySummaries.push(summary);
   state.history.matchdays.push(summary);
-  state.matchdaySummaries = state.matchdaySummaries.slice(-80);
+  state.matchdaySummaries = state.matchdaySummaries.slice(-120);
   return summary;
+}
+
+function computeEuropeSlots(state, cupChampionId) {
+  const taken = new Set();
+  const fromLeague = (pos) => {
+    const row = state.firstStandings[pos - 1];
+    return row ? getTeamById(state, row.teamId) : null;
+  };
+
+  const champion = fromLeague(1);
+  if (champion) taken.add(champion.id);
+
+  let cupTeam = cupChampionId ? getTeamById(state, cupChampionId) : null;
+  if (cupTeam && taken.has(cupTeam.id)) {
+    cupTeam = state.firstStandings.map((row) => getTeamById(state, row.teamId)).find((team) => team && !taken.has(team.id));
+  }
+  if (cupTeam) taken.add(cupTeam.id);
+
+  const continental2 = [];
+  for (let i = 1; i < state.firstStandings.length && continental2.length < 3; i += 1) {
+    const team = getTeamById(state, state.firstStandings[i].teamId);
+    if (team && !taken.has(team.id)) {
+      continental2.push({ id: team.id, name: team.name });
+      taken.add(team.id);
+    }
+  }
+
+  state.europeSlots = {
+    champions: champion ? [{ id: champion.id, name: champion.name }] : [],
+    cupWinners: cupTeam ? [{ id: cupTeam.id, name: cupTeam.name }] : [],
+    continental2,
+  };
 }
 
 function assignPrizeMoney(state, summary) {
   const champs = getTeamById(state, state.firstStandings[0].teamId);
   const cup = getTeamById(state, state.tournaments.cup?.championTeamId);
-  const champions = getTeamById(state, state.tournaments.champions?.championTeamId);
-  const cupWinners = getTeamById(state, state.tournaments.cupWinners?.championTeamId);
-  const cont2 = getTeamById(state, state.tournaments.continental2?.championTeamId);
-
   if (champs) { champs.budget += 18000000; champs.finances.prizes += 18000000; }
   if (cup) { cup.budget += 9000000; cup.finances.prizes += 9000000; }
-  if (champions) { champions.budget += 12000000; champions.finances.prizes += 12000000; }
-  if (cupWinners) { cupWinners.budget += 7000000; cupWinners.finances.prizes += 7000000; }
-  if (cont2) { cont2.budget += 6000000; cont2.finances.prizes += 6000000; }
-
-  if (summary) addNews(state, 'prizes', 'Premios económicos de final de temporada asignados.', 'media');
+  if (summary?.championsWinner) {
+    const ch = getTeamById(state, state.tournaments.champions?.championTeamId?.replace('ext:', ''));
+    if (ch) { ch.budget += 12000000; ch.finances.prizes += 12000000; }
+  }
 }
 
 function finalizeSeason(state) {
@@ -304,11 +433,12 @@ function finalizeSeason(state) {
   const promoted = state.secondStandings.slice(0, 2).map((row) => getTeamById(state, row.teamId));
   const relegated = state.firstStandings.slice(-2).map((row) => getTeamById(state, row.teamId));
 
-  const cup = makeKnockoutTournament(state, 'cup', 'Copa Nacional', [...state.firstDivision, ...state.secondDivision].slice(0, 16), false);
-  const champions = makeKnockoutTournament(state, 'champions', 'Copa de Campeones', state.firstDivision.slice(0, 8), true);
-  const cupWinners = makeKnockoutTournament(state, 'cupWinners', 'Copa de Campeones de Copa', [...state.firstDivision.slice(4, 8), ...state.secondDivision.slice(0, 4)], true);
-  const continental2 = makeKnockoutTournament(state, 'continental2', 'Copa Continental Secundaria', [...state.firstDivision.slice(1, 8), ...state.secondDivision.slice(0, 9)].slice(0, 16), true);
-  state.tournaments = { cup, champions, cupWinners, continental2 };
+  const cup = state.tournaments.cup;
+  const champions = state.tournaments.champions;
+  const cupWinners = state.tournaments.cupWinners;
+  const continental2 = state.tournaments.continental2;
+
+  computeEuropeSlots(state, cup?.championTeamId);
 
   const awards = getSeasonAwards(state);
 
@@ -316,23 +446,50 @@ function finalizeSeason(state) {
     season: state.season,
     year: state.year,
     leagueChampion: firstChampion.name,
-    cupChampion: cup.championName,
-    championsWinner: champions.championName,
-    cupWinnersWinner: cupWinners.championName,
-    continental2Winner: continental2.championName,
+    cupChampion: cup?.championName || 'Pendiente',
+    championsWinner: champions?.championName || 'No disputada',
+    cupWinnersWinner: cupWinners?.championName || 'No disputada',
+    continental2Winner: continental2?.championName || 'No disputada',
     relegated: relegated.map((team) => team.name),
     promoted: promoted.map((team) => team.name),
+    europeQualified: {
+      champions: state.europeSlots.champions.map((t) => t.name),
+      cupWinners: state.europeSlots.cupWinners.map((t) => t.name),
+      continental2: state.europeSlots.continental2.map((t) => t.name),
+    },
     awards,
   };
 
   assignPrizeMoney(state, summary);
 
-  registerTeamTitle(state, firstChampion.id, 'league');
-  registerTeamTitle(state, cup.championTeamId, 'cup');
-  registerTeamTitle(state, champions.championTeamId, 'champions');
-  registerTeamTitle(state, cupWinners.championTeamId, 'cupWinners');
-  registerTeamTitle(state, continental2.championTeamId, 'continental2');
+  registerTeamTitle(state, firstChampion.id, 'league', state.season);
+  if (cup?.championTeamId) registerTeamTitle(state, cup.championTeamId, 'cup', state.season);
+  if (champions?.championTeamId && !String(champions.championTeamId).startsWith('ext:')) registerTeamTitle(state, champions.championTeamId, 'champions', state.season);
+  if (cupWinners?.championTeamId && !String(cupWinners.championTeamId).startsWith('ext:')) registerTeamTitle(state, cupWinners.championTeamId, 'cupWinners', state.season);
+  if (continental2?.championTeamId && !String(continental2.championTeamId).startsWith('ext:')) registerTeamTitle(state, continental2.championTeamId, 'continental2', state.season);
+
+  [...state.firstStandings, ...state.secondStandings].forEach((row) => {
+    const team = getTeamById(state, row.teamId);
+    registerClubSeasonSnapshot(state, team, row, state.season, state.year);
+  });
+
+  state.history.globalBySeason.push({
+    season: state.season,
+    year: state.year,
+    leagueChampion: summary.leagueChampion,
+    cupChampion: summary.cupChampion,
+    europeQualified: summary.europeQualified,
+    promoted: summary.promoted,
+    relegated: summary.relegated,
+    pichichi: awards.pichichi,
+    zamora: awards.zamora,
+  });
+
   pushSeasonHistory(state, summary);
+
+  const external = simulateExternalEuropeSeason(state.season);
+  state.europeExternal.leagues = external.leagues;
+  state.europeExternal.history.push(external);
 
   const stayFirst = state.firstStandings.slice(0, 14).map((row) => getTeamById(state, row.teamId));
   const staySecond = state.secondStandings.slice(2).map((row) => getTeamById(state, row.teamId));
@@ -363,14 +520,37 @@ function finalizeSeason(state) {
   sortStandings(state.firstStandings);
   sortStandings(state.secondStandings);
 
+  buildSeasonCalendar(state);
+  setupSeasonTournaments(state);
   archivePlayers(state);
 }
 
+function ensureSeasonSetup(state) {
+  if (!state.seasonCalendar?.length) buildSeasonCalendar(state);
+  if (!state.tournaments?.cup) setupSeasonTournaments(state);
+}
+
 export function simulateMatchday(state) {
+  ensureSeasonSetup(state);
   if (state.currentMatchday > state.maxMatchday) return { done: true, message: 'Temporada ya finalizada' };
 
-  const firstReport = buildDivisionMatchday(state, 'd1');
-  const secondReport = buildDivisionMatchday(state, 'd2');
+  const weekEntry = getCalendarWeek(state, state.currentMatchday);
+  const firstReport = playLeagueWeek(state, 'd1', weekEntry);
+  const secondReport = playLeagueWeek(state, 'd2', weekEntry);
+
+  playTournamentRound(state, state.tournaments.cup, weekEntry);
+  playTournamentRound(state, state.tournaments.champions, weekEntry);
+  playTournamentRound(state, state.tournaments.cupWinners, weekEntry);
+  playTournamentRound(state, state.tournaments.continental2, weekEntry);
+
+  if (weekEntry?.competitions?.league) weekEntry.competitions.league.played = true;
+  Object.keys(weekEntry?.competitions || {}).forEach((key) => {
+    if (key !== 'league' && state.tournaments[key]) {
+      const round = state.tournaments[key].rounds.find((r) => r.week === state.currentMatchday);
+      if (round?.done) weekEntry.competitions[key].played = true;
+    }
+  });
+
   const matchdaySummary = registerMatchdaySummary(state, [...firstReport, ...secondReport]);
 
   if (!state.winterWindowOpened && state.currentMatchday >= Math.ceil(state.maxMatchday / 2)) {
@@ -389,6 +569,10 @@ export function simulateMatchday(state) {
 
   state.transferWindow = state.currentMatchday < 3 ? 'summer' : state.winterWindowOpened && state.currentMatchday < Math.ceil(state.maxMatchday / 2) + 2 ? 'winter' : 'closed';
   if (state.transferWindow !== 'closed') runAiTransferWindow(state);
+  return { done: false, message: `Semana ${state.currentMatchday - 1} simulada`, summary: matchdaySummary };
+}
 
-  return { done: false, message: `Jornada ${state.currentMatchday - 1} simulada`, summary: matchdaySummary };
+export function initializeSeasonStructures(state) {
+  buildSeasonCalendar(state);
+  setupSeasonTournaments(state);
 }
