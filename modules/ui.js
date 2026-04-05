@@ -49,7 +49,7 @@ function dashboardView(state) {
       <p>Equipo controlado: <strong>${userTeam?.name || '—'}</strong></p>
       <p>Mercado: <strong>${isTransferWindowOpen(state) ? state.transferWindow : 'cerrado'}</strong></p>
       <p>Afición: <strong>${userTeam?.fanMood || 'expectante'}</strong> · Entrenador: <strong>${userTeam?.coach?.name || '—'}</strong> (${userTeam?.coach?.status || 'estable'})</p>
-      <button class="btn primary" data-action="simulate">Simular semana</button>
+      <button class="btn primary" data-action="simulate">Simular fecha</button>
       <button class="btn" data-action="auto-lineups">Restaurar alineaciones óptimas</button>
     </section>
     <section class="card">
@@ -73,10 +73,12 @@ function matchdayView(state) {
   const day = Math.min(state.currentMatchday, state.maxMatchday);
   const round1 = state.firstSchedule.find((entry) => entry.matchday === day);
   const round2 = state.secondSchedule.find((entry) => entry.matchday === day);
+  const dayEvents = (state.seasonCalendar || []).filter((event) => event.dateIndex === day);
   const byId = Object.fromEntries([...state.firstDivision, ...state.secondDivision].map((team) => [team.id, team]));
 
   return `<div class="grid">
     ${summaryCard(state.matchdaySummaries.at(-1))}
+    <section class="card"><h2>Fecha ${day}</h2><p>${dayEvents.map((event) => tag(event.label || event.type)).join(' ') || 'Sin eventos'}</p></section>
     <section class="card"><h2>Primera División · Jornada ${day}</h2>${(round1?.matches || []).map((match) => {
       const result = state.results.d1[day]?.[`${match.home}-${match.away}`];
       return matchCard(byId[match.home], byId[match.away], result, result?.matchId || '');
@@ -120,27 +122,39 @@ function matchDetailView(state) {
 }
 
 function calendarView(state) {
-  const selected = state.seasonCalendar.find((w) => w.week === (state.selectedCalendarWeek || 1)) || state.seasonCalendar[0];
+  const selectedDate = state.selectedCalendarWeek || 1;
+  const grouped = (state.seasonCalendar || []).reduce((acc, event) => {
+    acc[event.dateIndex] = acc[event.dateIndex] || [];
+    acc[event.dateIndex].push(event);
+    return acc;
+  }, {});
+  const selectedEvents = grouped[selectedDate] || [];
+
   return `<div class="grid two">
     <section class="card">
-      <h2>Calendario de temporada</h2>
-      <div class="table-wrap"><table><thead><tr><th>Semana</th><th>Tipo</th><th>Estado</th><th></th></tr></thead><tbody>
-      ${state.seasonCalendar.map((week) => `<tr>
-        <td>${week.week}</td>
-        <td>${week.labels.map(tag).join(' ')}</td>
-        <td>${Object.values(week.competitions).every((c) => c.played) ? 'Completada' : 'Pendiente'}</td>
-        <td><button class="btn" data-action="calendar-week" data-week="${week.week}">Ver</button></td>
-      </tr>`).join('')}
+      <h2>Calendario maestro de temporada</h2>
+      <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Competiciones</th><th>Estado</th><th></th></tr></thead><tbody>
+      ${Object.keys(grouped).map(Number).sort((a, b) => a - b).map((dateKey) => {
+        const events = grouped[dateKey];
+        const isDone = events.every((event) => event.status === 'played' || event.status === 'idle');
+        return `<tr>
+          <td>${dateKey}</td>
+          <td>${events.map((event) => tag(`${event.label} · ${event.round}${event.leg > 1 ? ` (V${event.leg})` : ''}`)).join(' ')}</td>
+          <td>${isDone ? 'Completada' : 'Pendiente'}</td>
+          <td><button class="btn" data-action="calendar-week" data-week="${dateKey}">Ver</button></td>
+        </tr>`;
+      }).join('')}
       </tbody></table></div>
     </section>
     <section class="card">
-      <h3>Semana ${selected?.week || '—'}</h3>
-      <p>${selected?.labels.map(tag).join(' ') || ''}</p>
-      <ul>${(selected?.matches || []).map((id) => {
+      <h3>Fecha ${selectedDate}</h3>
+      <p>${selectedEvents.map((event) => tag(`${event.type}: ${event.competitionId}`)).join(' ') || ''}</p>
+      <ul>${selectedEvents.flatMap((event) => event.matches || []).map((id) => {
         const match = state.matchArchive[id];
         if (!match) return '';
-        return `<li>${match.competitionLabel}${match.round ? ` (${match.round})` : ''}: ${match.homeName} ${match.score} ${match.awayName} <button class="btn" data-action="open-match" data-match="${id}">Detalle</button></li>`;
-      }).join('') || '<li>Semana todavía no simulada.</li>'}</ul>
+        const pens = match.penalties ? ` (p. ${match.penalties.home}-${match.penalties.away})` : '';
+        return `<li>${match.competitionLabel}${match.round ? ` (${match.round})` : ''}${match.leg ? ` · V${match.leg}` : ''}: ${match.homeName} ${match.score}${pens} ${match.awayName} <button class="btn" data-action="open-match" data-match="${id}">Detalle</button></li>`;
+      }).join('') || '<li>Fecha todavía no simulada.</li>'}</ul>
     </section>
   </div>`;
 }
@@ -227,7 +241,13 @@ function tournamentBlock(tournament) {
   return `<article class="card">
     <h3>${tournament.title}</h3>
     <p><strong>Campeón:</strong> ${tournament.championName || 'Pendiente'}</p>
-    ${tournament.rounds.map((round) => `<div class="round"><h4>${round.round} · Semana ${round.week}</h4><ul>${round.matches.map((m) => `<li>${m.homeName} ${m.score} ${m.awayName} · ${m.winnerName}</li>`).join('') || '<li>Pendiente</li>'}</ul></div>`).join('')}
+    ${tournament.rounds.map((round) => `<div class="round"><h4>${round.round} · Fechas ${round.dates.join(' / ')}</h4><ul>${round.matches.map((m) => {
+      const home = m.winnerId === m.homeTeamId ? `<strong>${m.homeName}</strong>` : m.homeName;
+      const away = m.winnerId === m.awayTeamId ? `<strong>${m.awayName}</strong>` : m.awayName;
+      const legs = [m.leg1?.score, m.leg2?.score].filter(Boolean).join(' · ');
+      const aggregate = m.aggregate ? ` | Global ${m.aggregate}` : '';
+      return `<li>${home} vs ${away} ${legs ? `(${legs})` : ''}${aggregate}</li>`;
+    }).join('') || '<li>Pendiente</li>'}</ul></div>`).join('')}
   </article>`;
 }
 

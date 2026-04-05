@@ -5,7 +5,7 @@ import { competitions } from '../data/trophies.js';
 import { generateDoubleRoundRobin } from './scheduler.js';
 import { autoPickLineup } from './lineups.js';
 
-export const CURRENT_STATE_VERSION = 4;
+export const CURRENT_STATE_VERSION = 5;
 const START_YEAR = 2026;
 
 const squadShape = [...Array(3).fill('POR'), ...Array(8).fill('DEF'), ...Array(8).fill('MED'), ...Array(5).fill('DEL')];
@@ -143,6 +143,7 @@ export function createNewGame() {
 
   const state = {
     version: CURRENT_STATE_VERSION,
+    calendarVersion: 2,
     season: 1,
     year: START_YEAR,
     currentMatchday: 1,
@@ -224,6 +225,7 @@ function enrichLegacyState(raw) {
   raw.history.globalBySeason = raw.history.globalBySeason || [];
   raw.tournaments = raw.tournaments || {};
   raw.europeExternal = raw.europeExternal || { leagues: [], history: [] };
+  raw.calendarVersion = raw.calendarVersion || 1;
 
   allTeams(raw).forEach((team) => {
     if (!team.finances) team.finances = { transferIn: 0, transferOut: 0, prizes: 0 };

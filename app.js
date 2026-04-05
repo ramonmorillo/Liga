@@ -21,7 +21,7 @@ const statusLabel = document.getElementById('status-label');
 
 function repaint() {
   seasonLabel.textContent = `Temporada ${app.state.season} · Año ${app.state.year}`;
-  matchdayLabel.textContent = `Semana ${app.state.currentMatchday}/${app.state.maxMatchday}`;
+  matchdayLabel.textContent = `Fecha ${app.state.currentMatchday}/${app.state.maxMatchday}`;
   statusLabel.textContent = `Mercado: ${app.state.transferWindow}`;
 
   renderNav(nav, app.view, (view) => {
@@ -37,7 +37,7 @@ function repaint() {
 function runSimulation() {
   const output = simulateMatchday(app.state);
   if (output.done) app.view = views.endSeason;
-  else app.view = views.matchday;
+  else app.view = views.calendar;
   alert(output.summary ? `${output.message}. Partido destacado: ${output.summary.bigMatch}` : output.message);
   repaint();
 }
