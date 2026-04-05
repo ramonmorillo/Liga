@@ -7,7 +7,7 @@ import { autoPickLineup } from './lineups.js';
 import { normalizeExternalLeagueData } from './europe.js';
 import { ensurePlayerStatus, computePlayerStatus } from './playerStatus.js';
 
-export const CURRENT_STATE_VERSION = 9;
+export const CURRENT_STATE_VERSION = 10;
 const START_YEAR = 2026;
 
 const squadShape = [...Array(3).fill('POR'), ...Array(8).fill('DEF'), ...Array(8).fill('MED'), ...Array(5).fill('DEL')];
@@ -207,6 +207,7 @@ export function createNewGame() {
     userTeamId: firstDivision[0].id,
     transferWindow: 'summer',
     transferHistory: [],
+    transferOffers: [],
     freeCoaches: Array.from({ length: Math.max(10, Math.round((firstDivision.length + secondDivision.length) * 0.4)) }, () => createFreeCoachProfile()),
     recentNews: [],
     matchdaySummaries: [],
@@ -275,6 +276,26 @@ export function ensureFreeCoachPool(state, minimum = 10) {
 
 function enrichLegacyState(raw) {
   raw.transferHistory = raw.transferHistory || [];
+  raw.transferOffers = Array.isArray(raw.transferOffers) ? raw.transferOffers : Array.isArray(raw.marketOffers) ? raw.marketOffers : [];
+  raw.transferOffers = raw.transferOffers.map((offer) => ({
+    id: offer.id || `legacy-offer-${Math.random().toString(36).slice(2, 9)}`,
+    season: Number(offer.season || raw.season || 1),
+    matchday: Number(offer.matchday || raw.currentMatchday || 1),
+    status: offer.status === 'accepted' || offer.status === 'rejected' ? offer.status : 'pending',
+    sellerTeamId: offer.sellerTeamId || offer.teamId || offer.fromTeamId || null,
+    sellerTeamName: offer.sellerTeamName || offer.teamName || offer.fromTeamName || '',
+    buyerTeamId: offer.buyerTeamId || offer.toTeamId || null,
+    buyerTeamName: offer.buyerTeamName || offer.targetTeamName || offer.toTeamName || '',
+    playerId: offer.playerId || null,
+    playerName: offer.playerName || '',
+    playerPosition: offer.playerPosition || offer.position || '',
+    playerAge: typeof offer.playerAge === 'number' ? offer.playerAge : null,
+    playerValue: typeof offer.playerValue === 'number' ? offer.playerValue : (typeof offer.value === 'number' ? offer.value : null),
+    playerContractEndYear: typeof offer.playerContractEndYear === 'number' ? offer.playerContractEndYear : (typeof offer.contractEndYear === 'number' ? offer.contractEndYear : null),
+    amount: Math.max(1, Math.round(Number(offer.amount || offer.fee || offer.offer || 1))),
+    createdAt: offer.createdAt || Date.now(),
+    resolvedAt: offer.resolvedAt || null,
+  })).filter((offer) => offer.sellerTeamId && offer.buyerTeamId && offer.playerId);
   raw.recentNews = raw.recentNews || [];
   raw.matchdaySummaries = raw.matchdaySummaries || [];
   raw.selectedTeamId = raw.selectedTeamId || raw.userTeamId;
@@ -282,6 +303,7 @@ function enrichLegacyState(raw) {
   raw.selectedCalendarWeek = raw.selectedCalendarWeek || 1;
   raw.ui = raw.ui || { teamDetailTab: 'squad', selectedPlayerId: null, historyDivision: 'd1', historySeason: null };
   if (!raw.ui.teamDetailTab) raw.ui.teamDetailTab = 'squad';
+  if (raw.ui.teamDetailTab === 'market') raw.ui.teamDetailTab = 'offers';
   if (!raw.ui.historyDivision) raw.ui.historyDivision = 'd1';
   raw.matchArchive = raw.matchArchive || {};
   raw.seasonCalendar = raw.seasonCalendar || [];

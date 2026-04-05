@@ -3,12 +3,11 @@ import { clearGame, ensureGame, exportGame, importGame, saveGame } from './modul
 import { autoPickLineup } from './modules/lineups.js';
 import { allTeams, createNewGame, getTeamById } from './modules/state.js';
 import { dismissCoach, hireCoach, initializeSeasonStructures, simulateMatchday } from './modules/seasonEngine.js';
-import { releasePlayer, transferPlayer } from './modules/transfers.js';
+import { createTransferOffer, releasePlayer, resolveTransferOffer } from './modules/transfers.js';
 
 const app = {
   view: views.dashboard,
   state: ensureGame(),
-  marketFilters: {},
 };
 
 initializeSeasonStructures(app.state);
@@ -111,20 +110,6 @@ function bindViewActions() {
     repaint();
   });
 
-  root.querySelector('[data-action="apply-filters"]')?.addEventListener('click', () => {
-    const filters = {};
-    root.querySelectorAll('[data-filter]').forEach((field) => {
-      if (field.type === 'checkbox') {
-        if (field.checked) filters[field.dataset.filter] = field.value;
-      } else if (field.value) {
-        filters[field.dataset.filter] = field.value;
-      }
-    });
-    app.marketFilters = filters;
-    repaint();
-  });
-
-
   root.querySelectorAll('[data-action="team-tab"]').forEach((button) => {
     button.addEventListener('click', () => {
       app.state.ui = app.state.ui || {};
@@ -167,10 +152,24 @@ function bindViewActions() {
     });
   });
 
-  root.querySelectorAll('[data-action="buy"], [data-action="buy-clause"]').forEach((button) => {
+  root.querySelectorAll('[data-action="make-offer"]').forEach((button) => {
     button.addEventListener('click', () => {
-      const payClause = button.dataset.action === 'buy-clause';
-      const result = transferPlayer(app.state, button.dataset.team, app.state.userTeamId, button.dataset.player, payClause);
+      const result = createTransferOffer(
+        app.state,
+        button.dataset.seller,
+        app.state.userTeamId,
+        button.dataset.player,
+        Number(button.dataset.amount),
+      );
+      alert(result.message);
+      repaint();
+    });
+  });
+
+  root.querySelectorAll('[data-action="accept-offer"], [data-action="reject-offer"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const decision = button.dataset.action === 'accept-offer' ? 'accept' : 'reject';
+      const result = resolveTransferOffer(app.state, button.dataset.offer, decision);
       alert(result.message);
       repaint();
     });
@@ -193,6 +192,7 @@ document.getElementById('import-file').addEventListener('change', async (event) 
   try {
     app.state = await importGame(file);
     initializeSeasonStructures(app.state);
+    if (app.view === 'market') app.view = views.teams;
     alert('Partida importada correctamente');
     repaint();
   } catch (error) {
