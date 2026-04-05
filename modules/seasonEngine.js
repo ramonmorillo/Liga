@@ -6,6 +6,7 @@ import { pushSeasonHistory, registerTeamTitle, archivePlayers, registerClubSeaso
 import { runAiTransferWindow } from './transfers.js';
 import { generateDoubleRoundRobin } from './scheduler.js';
 import { simulateExternalEuropeSeason } from './europe.js';
+import { applyPlayerInjury, tickInjuries } from './playerStatus.js';
 
 const coachStates = ['estable', 'observado', 'en peligro', 'destituido'];
 const cupRoundFormat = [
@@ -371,6 +372,7 @@ function playLeagueDate(state, dateEvent, divisionKey) {
     if (!awayTeam.lineup?.starters?.length) awayTeam.lineup = autoPickLineup(awayTeam, awayTeam.tactics.formation);
 
     const result = simulateMatch(homeTeam, awayTeam, homeTeam.lineup, awayTeam.lineup, { competitionLabel: 'Liga' });
+    applyMatchInjuries(homeTeam, awayTeam, result.injuries);
     const record = createMatchRecord(state, {
       dateIndex: dateEvent.dateIndex,
       matchday: dateEvent.matchday,
@@ -407,6 +409,16 @@ function playLeagueDate(state, dateEvent, divisionKey) {
   sortStandings(standings);
   teams.forEach((team) => evaluateCoachStatus(team, standings, state));
   return report;
+}
+
+
+function applyMatchInjuries(homeTeam, awayTeam, injuries = []) {
+  injuries.forEach((injury) => {
+    const team = injury.side === 'home' ? homeTeam : awayTeam;
+    const player = team?.squad?.find((item) => item.id === injury.playerId);
+    if (!player) return;
+    applyPlayerInjury(player, injury.severity);
+  });
 }
 
 function getTournamentTeam(state, ref) {
@@ -576,6 +588,7 @@ function playTournamentEvent(state, tournament, dateEvent) {
 
     if (!homeTeam || !awayTeam) return;
     const raw = simulateMatch(homeTeam, awayTeam, homeLineup, awayLineup, { competitionLabel: tournament.title });
+    applyMatchInjuries(homeTeam, awayTeam, raw.injuries);
 
     let resolved = { ...raw, extraTime: false, penalties: null, resolutionText: null };
     if (!round.twoLegged && (!round.twoLegged || round.round === 'Final')) {
@@ -758,6 +771,7 @@ function finalizeSeason(state) {
   const firstChampion = getTeamById(state, state.firstStandings[0].teamId);
   const promoted = state.secondStandings.slice(0, 2).map((row) => getTeamById(state, row.teamId));
   const relegated = state.firstStandings.slice(-2).map((row) => getTeamById(state, row.teamId));
+  const secondChampion = getTeamById(state, state.secondStandings[0]?.teamId);
 
   const cup = state.tournaments.cup;
   const champions = state.tournaments.champions;
@@ -772,6 +786,7 @@ function finalizeSeason(state) {
     season: state.season,
     year: state.year,
     leagueChampion: firstChampion.name,
+    secondDivisionChampion: secondChampion?.name || 'Pendiente',
     cupChampion: cup?.championName || 'Pendiente',
     championsWinner: champions?.championName || 'No disputada',
     cupWinnersWinner: cupWinners?.championName || 'No disputada',
@@ -796,6 +811,7 @@ function finalizeSeason(state) {
   registerInternationalPalmares(state, 'continental2', 'Copa Continental Secundaria', continental2?.championName, continentalFinal ? (continentalFinal.winnerId === continentalFinal.homeTeamId ? continentalFinal.awayName : continentalFinal.homeName) : null);
 
   registerTeamTitle(state, firstChampion.id, 'league', state.season);
+  if (state.secondStandings[0]?.teamId) registerTeamTitle(state, state.secondStandings[0].teamId, 'league2', state.season);
   if (cup?.championTeamId) registerTeamTitle(state, cup.championTeamId, 'cup', state.season);
   if (champions?.championTeamId && !String(champions.championTeamId).startsWith('ext:')) registerTeamTitle(state, champions.championTeamId, 'champions', state.season);
   if (cupWinners?.championTeamId && !String(cupWinners.championTeamId).startsWith('ext:')) registerTeamTitle(state, cupWinners.championTeamId, 'cupWinners', state.season);
@@ -908,6 +924,11 @@ function simulateDateByEvent(state, event, allReports) {
 export function simulateMatchday(state) {
   ensureSeasonSetup(state);
   if (state.currentMatchday > state.maxMatchday) return { done: true, message: 'Temporada ya finalizada' };
+
+  tickInjuries(state);
+  allTeams(state).forEach((team) => {
+    if (!team.lineup?.starters?.length) team.lineup = autoPickLineup(team, team.tactics.formation);
+  });
 
   const dayEvents = listDateEvents(state, state.currentMatchday);
   const activeEvent = dayEvents[0];

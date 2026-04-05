@@ -1,7 +1,8 @@
-import { competitions } from '../data/trophies.js';
+import { competitions, getCompetitionTrophy, resolveCompetitionKey } from '../data/trophies.js';
 import { FORMATIONS } from './lineups.js';
 import { getMarketPlayers, isTransferWindowOpen } from './transfers.js';
 import { money, matchCard, positionNames, standingsTable, teamBadge, trophyCard, crestSvg, kitSvg, matchEventIcon } from './renderers.js';
+import { buildPlayerStatusBadge, computePlayerStatus, ensurePlayerStatus } from './playerStatus.js';
 import { contractSeasonsLeft, getTeamById } from './state.js';
 
 export const views = {
@@ -169,25 +170,37 @@ function calendarView(state) {
 
 function clubHistoryBlock(state, team) {
   const entries = (state.history.clubSeasonStats?.[team.id] || []).slice(-5).reverse();
-  const titles = {
-    league: state.history.clubTitles?.[`${team.id}:league`] || 0,
-    cup: state.history.clubTitles?.[`${team.id}:cup`] || 0,
-    champions: state.history.clubTitles?.[`${team.id}:champions`] || 0,
-    cupWinners: state.history.clubTitles?.[`${team.id}:cupWinners`] || 0,
-    continental2: state.history.clubTitles?.[`${team.id}:continental2`] || 0,
-  };
+  const titleLog = (state.history.clubTitleLog || []).filter((entry) => entry.teamId === team.id);
+  const grouped = titleLog.reduce((acc, entry) => {
+    const key = resolveCompetitionKey(entry.titleKey);
+    acc[key] = acc[key] || { key, seasons: [] };
+    if (!acc[key].seasons.includes(entry.season)) acc[key].seasons.push(entry.season);
+    return acc;
+  }, {});
+
+  const trophies = Object.values(grouped)
+    .map((item) => {
+      const trophy = getCompetitionTrophy(item.key);
+      return { ...item, trophy, count: item.seasons.length, seasons: [...item.seasons].sort((a, b) => a - b) };
+    })
+    .sort((a, b) => b.count - a.count || a.trophy.name.localeCompare(b.trophy.name));
+
   const all = state.history.clubSeasonStats?.[team.id] || [];
   const best = all.length ? Math.min(...all.map((x) => x.position)) : '—';
   const worst = all.length ? Math.max(...all.map((x) => x.position)) : '—';
   const div1 = all.filter((x) => x.division === 1).length;
   const div2 = all.filter((x) => x.division === 2).length;
-  const lastTitle = [...(state.history.clubTitleLog || [])].reverse().find((x) => x.teamId === team.id);
 
   return `<section class="card">
-    <h3>Histórico del club</h3>
-    <p><strong>Títulos:</strong> Liga ${titles.league} · Copa ${titles.cup} · Int. ${titles.champions + titles.cupWinners + titles.continental2}</p>
+    <h3>Palmarés</h3>
+    ${trophies.length ? `<div class="trophy-grid compact">${trophies.map((entry) => `<article class="trophy-row" style="--accent:${entry.trophy.accent}">
+      <span class="trophy-mark">${entry.trophy.icon}</span>
+      <div>
+        <strong>${entry.trophy.name}</strong>
+        <p class="small">${entry.count} título${entry.count > 1 ? 's' : ''} · Temporadas ${entry.seasons.join(', ')}</p>
+      </div>
+    </article>`).join('')}</div>` : '<p class="small">Sin títulos oficiales todavía.</p>'}
     <p><strong>Mejor/Peor posición:</strong> ${best} / ${worst} · <strong>Temporadas:</strong> Primera ${div1} · Segunda ${div2}</p>
-    <p><strong>Último título:</strong> ${lastTitle ? `${lastTitle.titleKey} (T${lastTitle.season})` : 'Ninguno'}</p>
     <div class="table-wrap"><table><thead><tr><th>Temp</th><th>Div</th><th>Pos</th><th>Pts</th></tr></thead><tbody>
     ${entries.map((e) => `<tr><td>${e.season}</td><td>${e.division}</td><td>${e.position}</td><td>${e.points}</td></tr>`).join('') || '<tr><td colspan="4">Sin histórico aún</td></tr>'}
     </tbody></table></div>
@@ -208,42 +221,81 @@ function teamDetailView(state) {
 
   const sorted = [...team.squad].sort((a, b) => b.overall - a.overall);
   const avgAttendance = team.stadium.seasonHomeMatches ? Math.round(team.stadium.seasonAttendanceTotal / team.stadium.seasonHomeMatches) : 0;
+  const financeRows = (team.financialHistory || []).slice(0, 8);
+  const marketRows = (team.marketHistory || []).slice(0, 12);
 
-  const financeRows = (team.financialHistory || []).slice(0, 6);
-  const marketRows = (team.marketHistory || []).slice(0, 10);
+  state.ui = state.ui || { teamDetailTab: 'squad', selectedPlayerId: null };
+  const tabs = [
+    { key: 'squad', label: 'Plantilla' },
+    { key: 'economy', label: 'Economía' },
+    { key: 'honours', label: 'Palmarés' },
+  ];
+  const activeTab = tabs.some((tab) => tab.key === state.ui.teamDetailTab) ? state.ui.teamDetailTab : 'squad';
+  const selectedPlayer = team.squad.find((p) => p.id === state.ui.selectedPlayerId) || sorted[0] || null;
+
+  const playerRow = (player) => {
+    const status = buildPlayerStatusBadge(player);
+    const contractLeft = contractSeasonsLeft(player, state.year);
+    const releaseAllowed = team.squad.length > 18 && player.form <= 64;
+    return `<tr>
+      <td><button class="btn" data-action="player-detail" data-player="${player.id}">${player.name} ${player.surname}</button></td>
+      <td>${status.icon} ${status.label}</td>
+      <td>${positionNames[player.position]}</td>
+      <td>${player.age}</td>
+      <td>${player.nationality}</td>
+      <td>${player.overall}</td>
+      <td>${player.potential}</td>
+      <td>Hasta ${player.contractEndYear || '—'}</td>
+      <td>${contractLeft} temp.</td>
+      <td>${player.energy}/${player.form}/${player.morale}</td>
+      <td>${player.seasonGoals}</td>
+      <td>${releaseAllowed ? `<button class="btn danger" data-action="release-player" data-team="${team.id}" data-player="${player.id}">Dar carta de libertad</button>` : '<span class="small">No recomendado</span>'}</td>
+    </tr>`;
+  };
+
+  const selectedStatus = selectedPlayer ? buildPlayerStatusBadge(selectedPlayer) : null;
+  if (selectedPlayer) {
+    ensurePlayerStatus(selectedPlayer);
+    computePlayerStatus(selectedPlayer);
+  }
+
+  const squadTab = `<section class="card">
+      <h3>Plantilla</h3>
+      ${selectedPlayer ? `<div class="player-focus"><strong>${selectedPlayer.name} ${selectedPlayer.surname}</strong><span class="tag">${selectedStatus.icon} ${selectedStatus.label}</span><span class="small">Posición ${positionNames[selectedPlayer.position]} · Valor ${money(selectedPlayer.value)}</span></div>` : ''}
+      <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Estado</th><th>Pos</th><th>Edad</th><th>Nac.</th><th>Med</th><th>Pot</th><th>Contrato</th><th>Restante</th><th>E/F/M</th><th>Goles</th><th>Acciones</th></tr></thead><tbody>
+      ${sorted.map(playerRow).join('')}
+      </tbody></table></div>
+    </section>`;
+
+  const economyTab = `<section class="card">
+      <h3>Economía reciente</h3>
+      <p><strong>Presupuesto actual:</strong> ${money(team.budget)}</p>
+      <div class="table-wrap"><table><thead><tr><th>Concepto</th><th>Importe</th><th>Temp.</th></tr></thead><tbody>
+      ${financeRows.map((row) => `<tr><td>${row.text}</td><td>${money(row.amount)}</td><td>${row.season}</td></tr>`).join('') || '<tr><td colspan="3">Sin movimientos recientes.</td></tr>'}
+      </tbody></table></div>
+      <h3>Movimientos de mercado</h3>
+      <div class="table-wrap"><table><thead><tr><th>Temp.</th><th>Operación</th><th>Jugador</th><th>Origen</th><th>Destino</th><th>Coste</th></tr></thead><tbody>
+      ${marketRows.map((row) => `<tr><td>${row.season}</td><td>${row.operation || row.type}</td><td>${row.playerName || '—'}</td><td>${row.origin || row.fromTeamName || team.name}</td><td>${row.destination || row.toTeamName || team.name}</td><td>${typeof row.fee === 'number' ? money(row.fee) : typeof row.cost === 'number' ? money(row.cost) : '—'}</td></tr>`).join('') || '<tr><td colspan="6">Sin movimientos de mercado registrados.</td></tr>'}
+      </tbody></table></div>
+    </section>`;
+
+  const honoursTab = clubHistoryBlock(state, team);
+
   return `<div class="grid two">
     <section class="card">
       <div class="club-head">${crestSvg(team, 72)}<div><h2>${team.name}</h2><p>División ${team.division} · Estilo ${team.style}</p></div></div>
       <p><strong>Entrenador:</strong> ${team.coach.name} (${team.coach.age}) · ${team.coach.style}</p>
       <p><strong>Estadio:</strong> ${team.stadium.name} (${team.stadium.capacity.toLocaleString('es-ES')})</p>
       <p><strong>Afición:</strong> ${team.fanMood} · Media ${avgAttendance.toLocaleString('es-ES')}</p>
-      <p><strong>Presupuesto:</strong> ${money(team.budget)}</p>
       <p><strong>Formación:</strong>
       <select data-action="formation" data-team="${team.id}">${Object.keys(FORMATIONS).map((f) => `<option value="${f}" ${team.lineup.formation === f ? 'selected' : ''}>${f}</option>`).join('')}</select></p>
       <button class="btn" data-action="set-user-team" data-team="${team.id}">Controlar este equipo</button>
       <button class="btn" data-action="auto-team-lineup" data-team="${team.id}">Alineación óptima</button>
       <button class="btn danger" data-action="dismiss-coach" data-team="${team.id}">Cesar entrenador</button>
       <div class="kit-row"><div><h5>Primera</h5>${kitSvg(team.kits.primary, 72)}</div><div><h5>Segunda</h5>${kitSvg(team.kits.away, 72)}</div></div>
+      <div class="tabs">${tabs.map((tab) => `<button class="btn ${activeTab === tab.key ? 'primary' : ''}" data-action="team-tab" data-tab="${tab.key}">${tab.label}</button>`).join('')}</div>
     </section>
-    <section class="card">
-      <h3>Plantilla</h3>
-      <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Pos</th><th>Edad</th><th>Nac.</th><th>Med</th><th>Pot</th><th>Contrato</th><th>Restante</th><th>E/F/M</th><th>Goles</th></tr></thead><tbody>
-      ${sorted.map((player) => `<tr><td>${player.name} ${player.surname}</td><td>${positionNames[player.position]}</td><td>${player.age}</td><td>${player.nationality}</td><td>${player.overall}</td><td>${player.potential}</td><td>Hasta ${player.contractEndYear || '—'}</td><td>${contractSeasonsLeft(player, state.year)} temp.</td><td>${player.energy}/${player.form}/${player.morale}</td><td>${player.seasonGoals}</td></tr>`).join('')}
-      </tbody></table></div>
-    </section>
-    <section class="card">
-      <h3>Economía reciente</h3>
-      <div class="table-wrap"><table><thead><tr><th>Concepto</th><th>Importe</th><th>Temp.</th></tr></thead><tbody>
-      ${financeRows.map((row) => `<tr><td>${row.text}</td><td>${money(row.amount)}</td><td>${row.season}</td></tr>`).join('') || '<tr><td colspan="3">Sin movimientos recientes.</td></tr>'}
-      </tbody></table></div>
-    </section>
-    <section class="card">
-      <h3>Movimientos de mercado</h3>
-      <div class="table-wrap"><table><thead><tr><th>Temp.</th><th>Operación</th><th>Jugador</th><th>Origen</th><th>Destino</th><th>Coste</th></tr></thead><tbody>
-      ${marketRows.map((row) => `<tr><td>${row.season}</td><td>${row.operation || row.type}</td><td>${row.playerName || '—'}</td><td>${row.origin || row.fromTeamName || team.name}</td><td>${row.destination || row.toTeamName || team.name}</td><td>${typeof row.fee === 'number' ? money(row.fee) : typeof row.cost === 'number' ? money(row.cost) : '—'}</td></tr>`).join('') || '<tr><td colspan="6">Sin movimientos de mercado registrados.</td></tr>'}
-      </tbody></table></div>
-    </section>
-    ${clubHistoryBlock(state, team)}
+    ${activeTab === 'squad' ? squadTab : activeTab === 'economy' ? economyTab : honoursTab}
   </div>`;
 }
 
@@ -301,10 +353,13 @@ function cupEuropeView(state) {
   return `<section class="card"><h2>Copa y Europa</h2>
     <div class="grid two">
       ${trophyCard(competitions.league.name, competitions.league.icon, competitions.league.accent, summary?.leagueChampion)}
+      ${trophyCard(competitions.league2.name, competitions.league2.icon, competitions.league2.accent, summary?.secondDivisionChampion)}
       ${trophyCard(competitions.cup.name, competitions.cup.icon, competitions.cup.accent, summary?.cupChampion)}
+      ${trophyCard(competitions.supercup.name, competitions.supercup.icon, competitions.supercup.accent, summary?.supercupWinner)}
       ${trophyCard(competitions.champions.name, competitions.champions.icon, competitions.champions.accent, summary?.championsWinner)}
       ${trophyCard(competitions.cupWinners.name, competitions.cupWinners.icon, competitions.cupWinners.accent, summary?.cupWinnersWinner)}
       ${trophyCard(competitions.continental2.name, competitions.continental2.icon, competitions.continental2.accent, summary?.continental2Winner)}
+      ${trophyCard(competitions.internationalSupercup.name, competitions.internationalSupercup.icon, competitions.internationalSupercup.accent, summary?.internationalSupercupWinner)}
     </div>
     <div class="grid two">
       ${tournamentBlock(state.tournaments.cup)}

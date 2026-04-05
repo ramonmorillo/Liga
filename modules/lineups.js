@@ -1,3 +1,5 @@
+import { ensurePlayerStatus } from './playerStatus.js';
+
 export const FORMATIONS = {
   '4-3-3': { POR: 1, DEF: 4, MED: 3, DEL: 3 },
   '4-4-2': { POR: 1, DEF: 4, MED: 4, DEL: 2 },
@@ -9,7 +11,10 @@ export function autoPickLineup(team, formation = team.tactics?.formation || '4-3
   const starters = [];
   Object.entries(shape).forEach(([position, amount]) => {
     const options = team.squad
-      .filter((player) => player.position === position)
+      .filter((player) => {
+        const status = ensurePlayerStatus(player);
+        return player.position === position && status.injuryGamesRemaining <= 0;
+      })
       .sort((a, b) => playerScore(b) - playerScore(a))
       .slice(0, amount)
       .map((player) => player.id);
@@ -17,7 +22,10 @@ export function autoPickLineup(team, formation = team.tactics?.formation || '4-3
   });
 
   const bench = team.squad
-    .filter((player) => !starters.includes(player.id))
+    .filter((player) => {
+      const status = ensurePlayerStatus(player);
+      return !starters.includes(player.id) && status.injuryGamesRemaining <= 0;
+    })
     .sort((a, b) => playerScore(b) - playerScore(a))
     .slice(0, 7)
     .map((player) => player.id);

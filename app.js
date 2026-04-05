@@ -3,7 +3,7 @@ import { clearGame, ensureGame, exportGame, importGame, saveGame } from './modul
 import { autoPickLineup } from './modules/lineups.js';
 import { allTeams, createNewGame, getTeamById } from './modules/state.js';
 import { dismissCoach, initializeSeasonStructures, simulateMatchday } from './modules/seasonEngine.js';
-import { transferPlayer } from './modules/transfers.js';
+import { releasePlayer, transferPlayer } from './modules/transfers.js';
 
 const app = {
   view: views.dashboard,
@@ -112,6 +112,35 @@ function bindViewActions() {
     });
     app.marketFilters = filters;
     repaint();
+  });
+
+
+  root.querySelectorAll('[data-action="team-tab"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      app.state.ui = app.state.ui || {};
+      app.state.ui.teamDetailTab = button.dataset.tab;
+      repaint();
+    });
+  });
+
+  root.querySelectorAll('[data-action="player-detail"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      app.state.ui = app.state.ui || {};
+      app.state.ui.selectedPlayerId = button.dataset.player;
+      repaint();
+    });
+  });
+
+  root.querySelectorAll('[data-action="release-player"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const team = getTeamById(app.state, button.dataset.team);
+      const player = team?.squad?.find((item) => item.id === button.dataset.player);
+      if (!team || !player) return;
+      if (!confirm(`¿Dar carta de libertad a ${player.name} ${player.surname}?`)) return;
+      const result = releasePlayer(app.state, team.id, player.id);
+      alert(result.message);
+      repaint();
+    });
   });
 
   root.querySelectorAll('[data-action="buy"], [data-action="buy-clause"]').forEach((button) => {

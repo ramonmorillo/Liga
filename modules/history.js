@@ -1,6 +1,8 @@
 import { allTeams } from './state.js';
 
 export function registerTeamTitle(state, teamId, titleKey, season = state.season) {
+  const alreadyLogged = (state.history.clubTitleLog || []).some((entry) => entry.teamId === teamId && entry.titleKey === titleKey && entry.season === season);
+  if (alreadyLogged) return;
   const key = `${teamId}:${titleKey}`;
   state.history.clubTitles[key] = (state.history.clubTitles[key] || 0) + 1;
   state.history.clubTitleLog.push({ season, teamId, titleKey });
