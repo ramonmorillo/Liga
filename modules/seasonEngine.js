@@ -1086,6 +1086,39 @@ function repairInternationalCalendarState(state) {
 
   const hasCompositeDates = state.seasonCalendar.some((event, _, list) => list.filter((x) => x.dateIndex === event.dateIndex).length > 1);
   if (hasCompositeDates) buildSeasonCalendar(state);
+
+  repairCalendarEventIntegrity(state);
+}
+
+function hydrateEventMatchesFromTournament(state, event) {
+  if (!event || event.type === 'league' || !event.competitionId) return;
+  const tournament = getTournament(state, event.competitionId);
+  const round = getRoundByEvent(tournament, event);
+  if (!round) return;
+  const legIndex = Math.max(1, round.dates.indexOf(event.dateIndex) + 1);
+  const legKey = round.twoLegged ? `leg${legIndex}` : 'leg1';
+  const recoveredIds = (round.matches || [])
+    .map((match) => match?.[legKey]?.matchId)
+    .filter((matchId) => Boolean(matchId && state.matchArchive?.[matchId]));
+  if (!recoveredIds.length) return;
+  event.matches = [...new Set([...(event.matches || []), ...recoveredIds])];
+}
+
+function hasEventPlayableDetail(state, event) {
+  if (!event) return false;
+  const ids = Array.isArray(event.matches) ? event.matches : [];
+  return ids.some((matchId) => Boolean(state.matchArchive?.[matchId]));
+}
+
+function repairCalendarEventIntegrity(state) {
+  if (!Array.isArray(state.seasonCalendar)) return;
+  state.seasonCalendar.forEach((event) => {
+    if (event.status !== 'completed') return;
+    if (!Array.isArray(event.matches)) event.matches = [];
+    hydrateEventMatchesFromTournament(state, event);
+    if (hasEventPlayableDetail(state, event)) return;
+    event.status = 'pending';
+  });
 }
 
 function simulateDateByEvent(state, event, allReports) {
@@ -1099,13 +1132,13 @@ function simulateDateByEvent(state, event, allReports) {
 
   if (event.type === 'cup') {
     playTournamentEvent(state, getTournament(state, 'cup'), event);
-    event.status = 'completed';
+    event.status = hasEventPlayableDetail(state, event) ? 'completed' : 'pending';
     return;
   }
 
   if (event.type === 'international') {
     playTournamentEvent(state, getTournament(state, event.competitionId), event);
-    event.status = 'completed';
+    event.status = hasEventPlayableDetail(state, event) ? 'completed' : 'pending';
     return;
   }
 
