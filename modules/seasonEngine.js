@@ -378,6 +378,14 @@ function setupSeasonTournaments(state) {
   ensureTournamentInventory(state);
 }
 
+function rebuildSeasonCompetitionState(state, { forceCalendar = false } = {}) {
+  const needsCalendar = forceCalendar || !Array.isArray(state.seasonCalendar) || !state.seasonCalendar.length || !state.seasonCalendar[0]?.type || state.calendarVersion !== 3;
+  if (needsCalendar) buildSeasonCalendar(state);
+  setupSeasonTournaments(state);
+  repairInternationalCalendarState(state);
+  ensureTournamentInventory(state);
+}
+
 function applyResult(standings, homeTeam, awayTeam, result) {
   const home = standings.find((row) => row.teamId === homeTeam.id);
   const away = standings.find((row) => row.teamId === awayTeam.id);
@@ -1135,8 +1143,7 @@ function finalizeSeason(state) {
   sortStandings(state.firstStandings);
   sortStandings(state.secondStandings);
 
-  buildSeasonCalendar(state);
-  setupSeasonTournaments(state);
+  rebuildSeasonCompetitionState(state, { forceCalendar: true });
   archivePlayers(state);
 }
 
@@ -1156,11 +1163,7 @@ function repairStuckSeasonTransition(state) {
 }
 
 function ensureSeasonSetup(state) {
-  const needsCalendarMigration = !state.seasonCalendar?.length || !state.seasonCalendar[0]?.type || state.calendarVersion !== 3;
-  if (needsCalendarMigration) buildSeasonCalendar(state);
-  if (!getTournament(state, 'cup') || !getTournament(state, 'cup')?.rounds?.length || !Array.isArray(getTournament(state, 'cup')?.rounds?.[0]?.dates)) setupSeasonTournaments(state);
-  repairInternationalCalendarState(state);
-  ensureTournamentInventory(state);
+  rebuildSeasonCompetitionState(state);
   if (state.cup?.championTeamId && !getTournament(state, 'cup')?.championTeamId) {
     const cup = getTournament(state, 'cup');
     cup.championTeamId = state.cup.championTeamId;
