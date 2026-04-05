@@ -1,6 +1,15 @@
 import { simulateMatch } from './matchEngine.js';
 import { autoPickLineup } from './lineups.js';
-import { sortStandings, getTeamById, resetSeasonStats, ageAndEvolveSquads, allTeams, moodFromMomentum, createCoachProfile } from './state.js';
+import {
+  sortStandings,
+  getTeamById,
+  resetSeasonStats,
+  ageAndEvolveSquads,
+  allTeams,
+  moodFromMomentum,
+  createCoachProfile,
+  ensureFreeCoachPool,
+} from './state.js';
 import { getSeasonAwards } from './awards.js';
 import { pushSeasonHistory, registerTeamTitle, archivePlayers, registerClubSeasonSnapshot } from './history.js';
 import { runAiTransferWindow } from './transfers.js';
@@ -360,6 +369,7 @@ function applyResult(standings, homeTeam, awayTeam, result) {
 }
 
 function evaluateCoachStatus(team, standings, state) {
+  if (!team.coach) return;
   const row = standings.find((item) => item.teamId === team.id);
   const total = standings.length;
   const pointsTrend = team.seasonStats.wins - team.seasonStats.losses;
@@ -375,6 +385,71 @@ function evaluateCoachStatus(team, standings, state) {
   team.coach.status = status;
 
   if (was !== status && status !== 'estable') addNews(state, 'coach-pressure', `${team.name}: ${team.coach.name} está ${status}.`, 'alta');
+}
+
+function normalizeFreeCoach(coach) {
+  if (!coach) return null;
+  return {
+    ...coach,
+    status: 'libre',
+    employmentStatus: 'free',
+    currentTeamId: null,
+    changes: Array.isArray(coach.changes) ? coach.changes : [],
+    pressure: 0,
+  };
+}
+
+function pushCoachToFreePool(state, coach, reason = 'fin de ciclo') {
+  if (!coach) return;
+  ensureFreeCoachPool(state, 0);
+  const normalized = normalizeFreeCoach(coach);
+  const alreadyExists = state.freeCoaches.some((item) => item.id === normalized.id);
+  if (alreadyExists) return;
+  normalized.changes.push({ season: state.season, week: state.currentMatchday, reason });
+  state.freeCoaches.unshift(normalized);
+}
+
+function hireCoachFromPool(state, team, coachId) {
+  if (!team) return { ok: false, message: 'Equipo no válido' };
+  ensureFreeCoachPool(state, 6);
+  if (team.coach) return { ok: false, message: 'El club ya tiene entrenador contratado' };
+
+  const coachIndex = state.freeCoaches.findIndex((coach) => coach.id === coachId);
+  if (coachIndex < 0) return { ok: false, message: 'Entrenador no disponible en bolsa' };
+  const [coach] = state.freeCoaches.splice(coachIndex, 1);
+  coach.employmentStatus = 'contracted';
+  coach.currentTeamId = team.id;
+  coach.status = 'estable';
+  coach.pressure = 0;
+  coach.changes = Array.isArray(coach.changes) ? coach.changes : [];
+  coach.changes.push({ season: state.season, week: state.currentMatchday, reason: 'nuevo contrato', teamId: team.id });
+  team.coach = coach;
+  return { ok: true, coach };
+}
+
+function resolveAiCoachVacancies(state) {
+  const aiVacancies = allTeams(state).filter((team) => !team.coach && team.id !== state.userTeamId);
+  if (!aiVacancies.length) return;
+  ensureFreeCoachPool(state, Math.max(8, aiVacancies.length + 3));
+  aiVacancies.forEach((team) => {
+    const ordered = [...state.freeCoaches].sort((a, b) => b.rating - a.rating);
+    const target = ordered[0];
+    if (!target) return;
+    const hired = hireCoachFromPool(state, team, target.id);
+    if (!hired.ok) return;
+    state.history.coachChanges.push({
+      season: state.season,
+      week: state.currentMatchday,
+      teamId: team.id,
+      teamName: team.name,
+      outCoach: 'Vacante',
+      inCoach: hired.coach.name,
+      compensation: 0,
+      source: 'pool',
+      byAi: true,
+    });
+    addNews(state, 'coach-change', `${team.name} contrata a ${hired.coach.name} desde entrenadores libres.`, 'media');
+  });
 }
 
 function playLeagueDate(state, dateEvent, divisionKey) {
@@ -1039,6 +1114,7 @@ function simulateDateByEvent(state, event, allReports) {
 
 export function simulateMatchday(state) {
   ensureSeasonSetup(state);
+  resolveAiCoachVacancies(state);
   if (state.currentMatchday > state.maxMatchday) return { done: true, message: 'Temporada ya finalizada' };
 
   tickInjuries(state);
@@ -1083,6 +1159,7 @@ export function simulateMatchday(state) {
 export function dismissCoach(state, teamId) {
   const team = getTeamById(state, teamId);
   if (!team) return { ok: false, message: 'Equipo no encontrado' };
+  if (!team.coach) return { ok: false, message: 'El club ya está sin entrenador' };
   const previousCoach = team.coach || createCoachProfile();
   const indemnizacion = Math.max(3000000, Math.round(team.budget * 0.04));
 
@@ -1095,23 +1172,67 @@ export function dismissCoach(state, teamId) {
     meta: { previousCoach: previousCoach.name },
   });
 
-  const newCoach = createCoachProfile();
-  newCoach.status = 'estable';
-  team.coach = newCoach;
-  team.coach.changes.push({ season: state.season, week: state.currentMatchday, reason: 'sustitución tras cese', previousCoach: previousCoach.name });
+  pushCoachToFreePool(state, previousCoach, 'cesado');
+  team.coach = null;
   state.history.coachChanges.push({
     season: state.season,
     week: state.currentMatchday,
     teamId: team.id,
     teamName: team.name,
     outCoach: previousCoach.name,
-    inCoach: newCoach.name,
+    inCoach: null,
     compensation: indemnizacion,
+    source: 'dismissal',
   });
-  addNews(state, 'coach-change', `${team.name} cesa a ${previousCoach.name}. Nuevo entrenador: ${newCoach.name}.`, 'alta');
-  return { ok: true, message: `${team.name} cesa a ${previousCoach.name}. Llega ${newCoach.name}.`, compensation: indemnizacion };
+  addNews(state, 'coach-change', `${team.name} cesa a ${previousCoach.name} y abre una vacante en el banquillo.`, 'alta');
+
+  if (team.id !== state.userTeamId) {
+    resolveAiCoachVacancies(state);
+    const hiredCoach = getTeamById(state, team.id)?.coach;
+    if (hiredCoach) {
+      return {
+        ok: true,
+        message: `${team.name} cesa a ${previousCoach.name}. La IA contrata a ${hiredCoach.name} desde la bolsa de libres.`,
+        compensation: indemnizacion,
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    message: `${team.name} cesa a ${previousCoach.name}. El club queda en vacante hasta contratar desde entrenadores libres.`,
+    compensation: indemnizacion,
+    vacancy: true,
+  };
+}
+
+export function getFreeCoaches(state) {
+  ensureFreeCoachPool(state, 8);
+  return state.freeCoaches;
+}
+
+export function hireCoach(state, teamId, coachId) {
+  const team = getTeamById(state, teamId);
+  if (!team) return { ok: false, message: 'Equipo no encontrado' };
+  const hired = hireCoachFromPool(state, team, coachId);
+  if (!hired.ok) return hired;
+  state.history.coachChanges.push({
+    season: state.season,
+    week: state.currentMatchday,
+    teamId: team.id,
+    teamName: team.name,
+    outCoach: 'Vacante',
+    inCoach: hired.coach.name,
+    compensation: 0,
+    source: 'pool',
+    byAi: team.id !== state.userTeamId,
+  });
+  addNews(state, 'coach-change', `${team.name} contrata a ${hired.coach.name} desde la bolsa de entrenadores libres.`, 'media');
+  return { ok: true, message: `${hired.coach.name} firma por ${team.name}.`, coach: hired.coach };
 }
 
 export function initializeSeasonStructures(state) {
   ensureSeasonSetup(state);
+  ensureFreeCoachPool(state, Math.max(10, Math.round(allTeams(state).length * 0.35)));
+  resolveAiCoachVacancies(state);
 }

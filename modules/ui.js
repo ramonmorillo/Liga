@@ -209,7 +209,7 @@ function clubHistoryBlock(state, team) {
 
 function teamsView(state) {
   const block = (title, teams) => `<section class="card"><h3>${title}</h3><div class="table-wrap"><table><thead><tr><th>Equipo</th><th>Div</th><th>Entrenador</th><th>Afición</th><th>Estadio</th><th>Presupuesto</th><th></th></tr></thead><tbody>
-  ${teams.map((team) => `<tr><td>${teamBadge(team)}</td><td>${team.division}</td><td>${team.coach.name}</td><td>${team.fanMood}</td><td>${team.stadium.name}</td><td>${money(team.budget)}</td><td><button class="btn" data-team="${team.id}" data-action="team-detail">Ver</button></td></tr>`).join('')}
+  ${teams.map((team) => `<tr><td>${teamBadge(team)}</td><td>${team.division}</td><td>${team.coach?.name || '<span class="danger">Vacante</span>'}</td><td>${team.fanMood}</td><td>${team.stadium.name}</td><td>${money(team.budget)}</td><td><button class="btn" data-team="${team.id}" data-action="team-detail">Ver</button></td></tr>`).join('')}
   </tbody></table></div></section>`;
 
   return `<div class="grid">${block('Primera División', state.firstDivision)}${block('Segunda División', state.secondDivision)}</div>`;
@@ -223,6 +223,7 @@ function teamDetailView(state) {
   const avgAttendance = team.stadium.seasonHomeMatches ? Math.round(team.stadium.seasonAttendanceTotal / team.stadium.seasonHomeMatches) : 0;
   const financeRows = (team.financialHistory || []).slice(0, 8);
   const marketRows = (team.marketHistory || []).slice(0, 12);
+  const freeCoaches = [...(state.freeCoaches || [])].sort((a, b) => b.rating - a.rating).slice(0, 14);
 
   state.ui = state.ui || { teamDetailTab: 'squad', selectedPlayerId: null };
   const tabs = [
@@ -284,14 +285,18 @@ function teamDetailView(state) {
   return `<div class="grid two">
     <section class="card">
       <div class="club-head">${crestSvg(team, 72)}<div><h2>${team.name}</h2><p>División ${team.division} · Estilo ${team.style}</p></div></div>
-      <p><strong>Entrenador:</strong> ${team.coach.name} (${team.coach.age}) · ${team.coach.style}</p>
+      <p><strong>Entrenador:</strong> ${team.coach ? `${team.coach.name} (${team.coach.age}) · ${team.coach.style}` : '<span class="danger">Vacante abierta</span>'}</p>
       <p><strong>Estadio:</strong> ${team.stadium.name} (${team.stadium.capacity.toLocaleString('es-ES')})</p>
       <p><strong>Afición:</strong> ${team.fanMood} · Media ${avgAttendance.toLocaleString('es-ES')}</p>
       <p><strong>Formación:</strong>
       <select data-action="formation" data-team="${team.id}">${Object.keys(FORMATIONS).map((f) => `<option value="${f}" ${team.lineup.formation === f ? 'selected' : ''}>${f}</option>`).join('')}</select></p>
       <button class="btn" data-action="set-user-team" data-team="${team.id}">Controlar este equipo</button>
       <button class="btn" data-action="auto-team-lineup" data-team="${team.id}">Alineación óptima</button>
-      <button class="btn danger" data-action="dismiss-coach" data-team="${team.id}">Cesar entrenador</button>
+      <button class="btn danger" data-action="dismiss-coach" data-team="${team.id}" ${team.coach ? '' : 'disabled'}>Cesar entrenador</button>
+      <h4>Entrenadores libres</h4>
+      <div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Nac.</th><th>Estilo</th><th>Nivel</th><th>Coste anual</th><th></th></tr></thead><tbody>
+      ${freeCoaches.map((coach) => `<tr><td>${coach.name}</td><td>${coach.nationality || 'España'}</td><td>${coach.style}</td><td>${coach.rating}</td><td>${money(coach.salary || 0)}</td><td><button class="btn" data-action="hire-coach" data-team="${team.id}" data-coach="${coach.id}" ${team.coach ? 'disabled' : ''}>Contratar</button></td></tr>`).join('') || '<tr><td colspan="6">No hay técnicos libres.</td></tr>'}
+      </tbody></table></div>
       <div class="kit-row"><div><h5>Primera</h5>${kitSvg(team.kits.primary, 72)}</div><div><h5>Segunda</h5>${kitSvg(team.kits.away, 72)}</div></div>
       <div class="tabs">${tabs.map((tab) => `<button class="btn ${activeTab === tab.key ? 'primary' : ''}" data-action="team-tab" data-tab="${tab.key}">${tab.label}</button>`).join('')}</div>
     </section>
@@ -304,9 +309,10 @@ function marketView(state, filters) {
   const players = getMarketPlayers(state, filters).slice(0, 80);
   return `<section class="card">
     <h2>Mercado de fichajes (${isTransferWindowOpen(state) ? state.transferWindow : 'cerrado'})</h2>
+    <p class="small">Solo aparecen jugadores en último año de contrato y casos especiales permitidos.</p>
     <p>Presupuesto ${userTeam.name}: <strong>${money(userTeam.budget)}</strong></p>
-    <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Club</th><th>Pos</th><th>Edad</th><th>Media</th><th>Pot</th><th>Valor</th><th>Acciones</th></tr></thead><tbody>
-    ${players.map((player) => `<tr><td>${player.name} ${player.surname}</td><td>${player.teamName}</td><td>${player.position}</td><td>${player.age}</td><td>${player.overall}</td><td>${player.potential}</td><td>${money(player.value)}</td><td><button class="btn" data-action="buy" data-player="${player.id}" data-team="${player.teamId}">Oferta</button></td></tr>`).join('')}
+    <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Club</th><th>Pos</th><th>Edad</th><th>Media</th><th>Pot</th><th>Contrato restante</th><th>Valor</th><th>Acciones</th></tr></thead><tbody>
+    ${players.map((player) => `<tr><td>${player.name} ${player.surname}</td><td>${player.teamName}</td><td>${player.position}</td><td>${player.age}</td><td>${player.overall}</td><td>${player.potential}</td><td>${Math.max(0, (player.contractEndYear || state.year) - state.year)} temp.</td><td>${money(player.value)}</td><td><button class="btn" data-action="buy" data-player="${player.id}" data-team="${player.teamId}">Oferta</button></td></tr>`).join('')}
     </tbody></table></div>
   </section>`;
 }

@@ -7,7 +7,7 @@ import { autoPickLineup } from './lineups.js';
 import { normalizeExternalLeagueData } from './europe.js';
 import { ensurePlayerStatus, computePlayerStatus } from './playerStatus.js';
 
-export const CURRENT_STATE_VERSION = 8;
+export const CURRENT_STATE_VERSION = 9;
 const START_YEAR = 2026;
 
 const squadShape = [...Array(3).fill('POR'), ...Array(8).fill('DEF'), ...Array(8).fill('MED'), ...Array(5).fill('DEL')];
@@ -28,10 +28,12 @@ function coachId() {
 }
 
 export function createCoachProfile() {
-  const pools = namePools.España;
+  const nationality = pick(euNationalities);
+  const pools = namePools[nationality] || namePools.España;
   return {
     id: coachId(),
     name: `${pick(pools.first)} ${pick(pools.last)}`,
+    nationality,
     age: rand(38, 67),
     style: pick(coachStyles),
     rating: rand(60, 88),
@@ -39,7 +41,18 @@ export function createCoachProfile() {
     status: 'estable',
     pressure: 0,
     changes: [],
+    employmentStatus: 'contracted',
+    currentTeamId: null,
+    salary: rand(450000, 4200000),
   };
+}
+
+function createFreeCoachProfile() {
+  const coach = createCoachProfile();
+  coach.status = 'libre';
+  coach.employmentStatus = 'free';
+  coach.currentTeamId = null;
+  return coach;
 }
 
 function createContractEndYear(currentYear = START_YEAR) {
@@ -153,6 +166,7 @@ function setupTeam(raw, idx, division) {
     return p;
   });
 
+  team.coach.currentTeamId = id;
   team.lineup = autoPickLineup(team, team.tactics.formation);
   return team;
 }
@@ -193,6 +207,7 @@ export function createNewGame() {
     userTeamId: firstDivision[0].id,
     transferWindow: 'summer',
     transferHistory: [],
+    freeCoaches: Array.from({ length: Math.max(10, Math.round((firstDivision.length + secondDivision.length) * 0.4)) }, () => createFreeCoachProfile()),
     recentNews: [],
     matchdaySummaries: [],
     selectedTeamId: firstDivision[0].id,
@@ -251,6 +266,13 @@ export function contractSeasonsLeft(player, currentYear) {
   return Math.max(0, player.contractEndYear - currentYear);
 }
 
+export function ensureFreeCoachPool(state, minimum = 10) {
+  state.freeCoaches = Array.isArray(state.freeCoaches) ? state.freeCoaches : [];
+  while (state.freeCoaches.length < minimum) {
+    state.freeCoaches.push(createFreeCoachProfile());
+  }
+}
+
 function enrichLegacyState(raw) {
   raw.transferHistory = raw.transferHistory || [];
   raw.recentNews = raw.recentNews || [];
@@ -276,6 +298,7 @@ function enrichLegacyState(raw) {
   raw.prizeLedger = raw.prizeLedger || {};
   raw.tournaments = raw.tournaments || {};
   raw.europeExternal = raw.europeExternal || { leagues: [], history: [] };
+  raw.freeCoaches = Array.isArray(raw.freeCoaches) ? raw.freeCoaches : [];
   raw.calendarVersion = raw.calendarVersion || 1;
   normalizeExternalLeagueData(raw.europeExternal);
 
@@ -292,10 +315,16 @@ function enrichLegacyState(raw) {
       team.fanMood = team.fanMood || identity.fanMood;
       team.supporterMomentum = team.supporterMomentum || 0;
     }
-    if (!team.coach.changes) team.coach.changes = [];
-    if (!team.coach.status) team.coach.status = 'estable';
-    if (!team.coach.pressure) team.coach.pressure = 0;
-    if (!team.coach.id) team.coach.id = coachId();
+    if (team.coach) {
+      if (!team.coach.changes) team.coach.changes = [];
+      if (!team.coach.status) team.coach.status = 'estable';
+      if (!team.coach.pressure) team.coach.pressure = 0;
+      if (!team.coach.id) team.coach.id = coachId();
+      if (!team.coach.nationality) team.coach.nationality = 'España';
+      if (!team.coach.salary) team.coach.salary = rand(450000, 4200000);
+      team.coach.employmentStatus = 'contracted';
+      team.coach.currentTeamId = team.id;
+    }
 
     team.squad.forEach((player) => {
       if (!player.history) player.history = { seasons: 0, clubs: [team.id], goals: 0, titles: [] };
@@ -308,6 +337,22 @@ function enrichLegacyState(raw) {
       computePlayerStatus(player);
     });
   });
+
+  const busyCoachIds = new Set(allTeams(raw).map((team) => team.coach?.id).filter(Boolean));
+  raw.freeCoaches = raw.freeCoaches
+    .filter((coach) => coach && !busyCoachIds.has(coach.id))
+    .map((coach) => ({
+      ...coach,
+      changes: Array.isArray(coach.changes) ? coach.changes : [],
+      id: coach.id || coachId(),
+      nationality: coach.nationality || 'España',
+      pressure: 0,
+      status: 'libre',
+      employmentStatus: 'free',
+      currentTeamId: null,
+      salary: coach.salary || rand(450000, 4200000),
+    }));
+  ensureFreeCoachPool(raw, Math.max(10, Math.round(allTeams(raw).length * 0.35)));
 
   raw.version = CURRENT_STATE_VERSION;
   return raw;
