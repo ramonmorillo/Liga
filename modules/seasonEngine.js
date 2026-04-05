@@ -898,8 +898,9 @@ function storeSeasonFinalStandings(state) {
     d2: freezeDivisionStandings(state, 'd2', state.secondStandings),
   };
   const index = state.history.finalStandingsBySeason.findIndex((item) => item.season === state.season);
-  if (index >= 0) state.history.finalStandingsBySeason[index] = payload;
-  else state.history.finalStandingsBySeason.push(payload);
+  const snapshot = typeof structuredClone === 'function' ? structuredClone(payload) : JSON.parse(JSON.stringify(payload));
+  if (index >= 0) state.history.finalStandingsBySeason[index] = snapshot;
+  else state.history.finalStandingsBySeason.push(snapshot);
 }
 
 function requiredTournaments(state) {
@@ -1020,6 +1021,9 @@ function finalizeSeason(state) {
   });
 
   pushSeasonHistory(state, summary);
+  if (!state.history.seasons.some((entry) => entry.season === summary.season)) {
+    throw new Error(`No se pudo persistir el histórico de la temporada ${summary.season}`);
+  }
 
   const external = simulateExternalEuropeSeason(state.season);
   state.europeExternal.leagues = external.leagues;
@@ -1059,6 +1063,21 @@ function finalizeSeason(state) {
   buildSeasonCalendar(state);
   setupSeasonTournaments(state);
   archivePlayers(state);
+}
+
+function repairStuckSeasonTransition(state) {
+  if (state.currentMatchday <= state.maxMatchday) return { repaired: false };
+  const hasSnapshot = state.history?.seasons?.some((entry) => entry.season === state.season);
+  if (hasSnapshot) return { repaired: false };
+
+  const seasonCheck = ensureCompetitionsResolvedBeforeClosure(state);
+  if (!seasonCheck.ok) {
+    state.currentMatchday = state.maxMatchday;
+    return { repaired: true, blocked: true, unresolved: seasonCheck.unresolved };
+  }
+
+  finalizeSeason(state);
+  return { repaired: true, finalized: true };
 }
 
 function ensureSeasonSetup(state) {
@@ -1147,6 +1166,7 @@ function simulateDateByEvent(state, event, allReports) {
 
 export function simulateMatchday(state) {
   ensureSeasonSetup(state);
+  repairStuckSeasonTransition(state);
   resolveAiCoachVacancies(state);
   if (state.currentMatchday > state.maxMatchday) return { done: true, message: 'Temporada ya finalizada' };
 
@@ -1176,6 +1196,7 @@ export function simulateMatchday(state) {
     const seasonCheck = ensureCompetitionsResolvedBeforeClosure(state);
     if (!seasonCheck.ok) {
       const names = seasonCheck.unresolved.map((item) => item.title).join(', ');
+      state.currentMatchday = state.maxMatchday;
       return { done: false, message: `Cierre bloqueado: competiciones pendientes (${names})`, summary: matchdaySummary };
     }
     finalizeSeason(state);
@@ -1266,6 +1287,7 @@ export function hireCoach(state, teamId, coachId) {
 
 export function initializeSeasonStructures(state) {
   ensureSeasonSetup(state);
+  repairStuckSeasonTransition(state);
   ensureFreeCoachPool(state, Math.max(10, Math.round(allTeams(state).length * 0.35)));
   resolveAiCoachVacancies(state);
 }

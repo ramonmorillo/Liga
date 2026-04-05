@@ -37,11 +37,12 @@ export function archivePlayers(state) {
 }
 
 export function pushSeasonHistory(state, summary) {
-  state.history.seasons.push(summary);
+  const snapshot = typeof structuredClone === 'function' ? structuredClone(summary) : JSON.parse(JSON.stringify(summary));
+  state.history.seasons.push(snapshot);
   state.history.topScorers.push({
-    season: summary.season,
-    year: summary.year,
-    pichichi: summary.awards.pichichi,
+    season: snapshot.season,
+    year: snapshot.year,
+    pichichi: snapshot.awards.pichichi,
   });
-  state.lastSeasonSummary = summary;
+  state.lastSeasonSummary = snapshot;
 }
