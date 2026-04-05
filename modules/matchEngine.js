@@ -59,17 +59,24 @@ function minuteValue(minuteLabel) {
   return Number.parseInt(minuteLabel, 10);
 }
 
-function createScorerEvents(goalCount, bag, side) {
+function createScorerEvents(goalCount, bag, side, ownGoalBag = null) {
   const events = [];
   for (let i = 0; i < goalCount; i += 1) {
-    const player = bag[Math.floor(Math.random() * bag.length)];
+    const isOwnGoal = ownGoalBag && Math.random() < 0.08;
+    const fromBag = isOwnGoal ? ownGoalBag : bag;
+    const player = fromBag[Math.floor(Math.random() * fromBag.length)];
+    const isPenalty = !isOwnGoal && Math.random() < 0.18;
     events.push({
       minute: generateMinute(),
-      type: 'goal',
+      type: isOwnGoal ? 'ownGoal' : isPenalty ? 'penalty' : 'goal',
       side,
       playerId: player.id,
       playerName: `${player.name} ${player.surname}`,
-      text: `Gol de ${player.name} ${player.surname}`,
+      text: isOwnGoal
+        ? `Autogol de ${player.name} ${player.surname}`
+        : isPenalty
+          ? `Gol de penalti de ${player.name} ${player.surname}`
+          : `Gol de ${player.name} ${player.surname}`,
     });
   }
   return events;
@@ -149,12 +156,12 @@ export function simulateMatch(homeTeam, awayTeam, homeLineup, awayLineup, contex
   const homePossession = Math.round(((home.control * home.rating) / controlTotal) * 100);
 
   const homeEvents = [
-    ...createScorerEvents(homeGoals, weightedPlayers(homeTeam, homeLineup, 'goal'), 'home'),
+    ...createScorerEvents(homeGoals, weightedPlayers(homeTeam, homeLineup, 'goal'), 'home', weightedPlayers(awayTeam, awayLineup, 'goal')),
     ...createDisciplineEvents(homeTeam, homeLineup, 'home'),
     ...createInjuryEvents(homeTeam, homeLineup, 'home'),
   ];
   const awayEvents = [
-    ...createScorerEvents(awayGoals, weightedPlayers(awayTeam, awayLineup, 'goal'), 'away'),
+    ...createScorerEvents(awayGoals, weightedPlayers(awayTeam, awayLineup, 'goal'), 'away', weightedPlayers(homeTeam, homeLineup, 'goal')),
     ...createDisciplineEvents(awayTeam, awayLineup, 'away'),
     ...createInjuryEvents(awayTeam, awayLineup, 'away'),
   ];
@@ -173,7 +180,7 @@ export function simulateMatch(homeTeam, awayTeam, homeLineup, awayLineup, contex
     homeShotsOnTarget: homeSoT,
     awayShotsOnTarget: awaySoT,
     events,
-    goals: events.filter((event) => event.type === 'goal'),
+    goals: events.filter((event) => event.type === 'goal' || event.type === 'penalty' || event.type === 'ownGoal'),
     cards: events.filter((event) => event.type === 'yellow' || event.type === 'red'),
     injuries: events.filter((event) => event.type === 'injury'),
     mvp,

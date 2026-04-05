@@ -50,9 +50,24 @@ export function trophyCard(title, icon, accent, winner) {
   return `<article class="trophy-card" style="--accent:${accent}"><div class="trophy-icon">${icon}</div><h4>${title}</h4><p>${winner || 'Pendiente'}</p></article>`;
 }
 
+export function matchEventIcon(type) {
+  if (type === 'goal') return '⚽';
+  if (type === 'penalty') return '🎯';
+  if (type === 'ownGoal') return '🥅';
+  if (type === 'yellow') return '🟨';
+  if (type === 'red') return '🟥';
+  if (type === 'injury') return '🩹';
+  return '•';
+}
+
 function eventLabel(event) {
-  const icon = event.type === 'goal' ? '⚽' : event.type === 'yellow' ? '🟨' : event.type === 'red' ? '🟥' : '🩹';
-  return `<li>${icon} ${event.minute}' · ${event.playerName}</li>`;
+  const label = event.type === 'penalty' ? 'Penalti'
+    : event.type === 'ownGoal' ? 'Autogol'
+      : event.type === 'yellow' ? 'Amarilla'
+        : event.type === 'red' ? 'Roja'
+          : event.type === 'injury' ? 'Lesión'
+            : 'Gol';
+  return `<li><span>${event.minute}'</span> ${matchEventIcon(event.type)} ${event.playerName} · ${label}</li>`;
 }
 
 export function matchCard(home, away, result, key = '') {
@@ -73,7 +88,10 @@ export function matchCard(home, away, result, key = '') {
       <span>Asistencia ${result.attendance?.attendance?.toLocaleString('es-ES') || '—'} (${result.attendance?.occupancy || '—'}%)</span>
     </div>
     <div class="grid two">
-      <div><h5>Cronología</h5><ul>${result.events.map(eventLabel).join('') || '<li>Sin incidencias</li>'}</ul></div>
+      <div><h5>${home.name}</h5><ul class="timeline">${result.events.filter((event) => event.side === 'home').map(eventLabel).join('') || '<li>Sin incidencias</li>'}</ul></div>
+      <div><h5>${away.name}</h5><ul class="timeline">${result.events.filter((event) => event.side === 'away').map(eventLabel).join('') || '<li>Sin incidencias</li>'}</ul></div>
+    </div>
+    <div class="grid two">
       <div><h5>Resumen</h5><p class="small">${result.summaryText || 'Partido equilibrado.'}</p><button class="btn" data-action="open-match" data-match="${key}">Ver detalle</button></div>
     </div>
   </article>`;

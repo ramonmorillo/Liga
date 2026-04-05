@@ -9,21 +9,21 @@ import { simulateExternalEuropeSeason } from './europe.js';
 
 const coachStates = ['estable', 'observado', 'en peligro', 'destituido'];
 const cupRoundFormat = [
-  { round: 'Octavos', dates: [4], twoLegged: false },
-  { round: 'Cuartos', dates: [9], twoLegged: false },
-  { round: 'Semifinal', dates: [14, 15], twoLegged: true },
-  { round: 'Final', dates: [19], twoLegged: false },
+  { round: 'Octavos', slots: 1, twoLegged: false, anchors: [4] },
+  { round: 'Cuartos', slots: 1, twoLegged: false, anchors: [9] },
+  { round: 'Semifinal', slots: 2, twoLegged: true, anchors: [14, 15] },
+  { round: 'Final', slots: 1, twoLegged: false, anchors: [19] },
 ];
 const euroRoundFormat = [
-  { round: 'Cuartos', dates: [8, 9], twoLegged: true },
-  { round: 'Semifinal', dates: [13, 14], twoLegged: true },
-  { round: 'Final', dates: [18], twoLegged: false },
+  { round: 'Cuartos', slots: 2, twoLegged: true, anchors: [8, 9] },
+  { round: 'Semifinal', slots: 2, twoLegged: true, anchors: [13, 14] },
+  { round: 'Final', slots: 1, twoLegged: false, anchors: [18] },
 ];
 const continentalRoundFormat = [
-  { round: 'Octavos', dates: [6, 7], twoLegged: true },
-  { round: 'Cuartos', dates: [11, 12], twoLegged: true },
-  { round: 'Semifinal', dates: [16, 17], twoLegged: true },
-  { round: 'Final', dates: [20], twoLegged: false },
+  { round: 'Octavos', slots: 2, twoLegged: true, anchors: [6, 7] },
+  { round: 'Cuartos', slots: 2, twoLegged: true, anchors: [11, 12] },
+  { round: 'Semifinal', slots: 2, twoLegged: true, anchors: [16, 17] },
+  { round: 'Final', slots: 1, twoLegged: false, anchors: [20] },
 ];
 const PRIZE_AMOUNTS = {
   league: 100000000,
@@ -135,7 +135,7 @@ function createTournamentTemplate(key, title, roundFormat, participants) {
     currentRound: roundFormat[0]?.round || null,
     rounds: roundFormat.map((entry) => ({
       round: entry.round,
-      dates: entry.dates,
+      dates: [],
       twoLegged: entry.twoLegged,
       done: false,
       pairs: [],
@@ -156,80 +156,92 @@ function mapCompetitionLabel(event) {
 }
 
 function buildSeasonCalendar(state) {
-  const events = [];
-  for (let dateIndex = 1; dateIndex <= state.maxMatchday; dateIndex += 1) {
-    events.push({
-      id: `S${state.season}-D${dateIndex}-league`,
-      season: state.season,
-      dateIndex,
-      type: 'league',
-      competitionId: 'league',
-      round: `Jornada ${dateIndex}`,
-      leg: 1,
-      status: 'pending',
-      matchday: dateIndex,
-      matches: [],
-      label: 'Liga',
+  const leagueRounds = (state.firstDivision.length - 1) * 2;
+  state.leagueMatchdays = leagueRounds;
+
+  const entries = [];
+  for (let round = 1; round <= leagueRounds; round += 1) {
+    entries.push({
+      anchor: round,
+      order: 0,
+      event: {
+        id: `S${state.season}-L${round}`,
+        season: state.season,
+        type: 'league',
+        competitionId: 'league',
+        round: `Jornada ${round}`,
+        leg: 1,
+        status: 'pending',
+        matchday: round,
+        matches: [],
+        label: 'Liga',
+      },
     });
   }
 
-  cupRoundFormat.forEach((roundConfig) => {
-    roundConfig.dates.forEach((date, idx) => {
-      events.push({
-        id: `S${state.season}-D${date}-cup-${roundConfig.round}-${idx + 1}`,
-        season: state.season,
-        dateIndex: date,
-        type: 'cup',
-        competitionId: 'cup',
-        round: roundConfig.round,
-        leg: roundConfig.twoLegged ? idx + 1 : 1,
-        status: 'pending',
-        matches: [],
-        label: 'Copa Nacional',
-      });
-    });
-  });
-
-  if (state.season > 1) {
-    const internationalSets = [
-      { competitionId: 'continental2', label: 'Copa Continental', format: continentalRoundFormat },
-      { competitionId: 'champions', label: 'Copa de Campeones', format: euroRoundFormat },
-      { competitionId: 'cupWinners', label: 'Copa de Campeones de Copa', format: euroRoundFormat },
-    ];
-
-    internationalSets.forEach((set) => {
-      set.format.forEach((roundConfig) => {
-        roundConfig.dates.forEach((date, idx) => {
-          events.push({
-            id: `S${state.season}-D${date}-${set.competitionId}-${roundConfig.round}-${idx + 1}`,
+  const attachRoundSet = (type, competitionId, label, format) => {
+    format.forEach((roundConfig) => {
+      roundConfig.anchors.forEach((anchor, idx) => {
+        entries.push({
+          anchor,
+          order: type === 'cup' ? 1 : 2,
+          event: {
+            id: `S${state.season}-${competitionId}-${roundConfig.round}-${idx + 1}`,
             season: state.season,
-            dateIndex: date,
-            type: 'international',
-            competitionId: set.competitionId,
+            type,
+            competitionId,
             round: roundConfig.round,
             leg: roundConfig.twoLegged ? idx + 1 : 1,
             status: 'pending',
             matches: [],
-            label: set.label,
-          });
+            label,
+          },
         });
       });
     });
+  };
+
+  attachRoundSet('cup', 'cup', 'Copa Nacional', cupRoundFormat);
+  if (state.season > 1) {
+    attachRoundSet('international', 'continental2', 'Copa Continental', continentalRoundFormat);
+    attachRoundSet('international', 'champions', 'Copa de Campeones', euroRoundFormat);
+    attachRoundSet('international', 'cupWinners', 'Copa de Campeones de Copa', euroRoundFormat);
   }
 
-  events.sort((a, b) => a.dateIndex - b.dateIndex || priorityByType(a.type) - priorityByType(b.type));
+  entries.sort((a, b) => a.anchor - b.anchor || a.order - b.order);
+  const events = entries.map((entry, index) => ({ ...entry.event, dateIndex: index + 1, week: index + 1 }));
+
+  state.maxMatchday = events.length;
+  state.currentMatchday = Math.min(state.currentMatchday, state.maxMatchday);
   state.seasonCalendar = events;
   state.selectedCalendarWeek = Math.min(state.selectedCalendarWeek || 1, state.maxMatchday);
-  state.calendarVersion = 2;
+  state.calendarVersion = 3;
 }
 
 function priorityByType(type) {
   return type === 'league' ? 0 : type === 'cup' ? 1 : type === 'international' ? 2 : 3;
 }
 
+function normalizeCupParticipants(participants, slots = 16) {
+  const trimmed = [...participants].slice(0, slots);
+  while (trimmed.length < slots) trimmed.push(null);
+  return shuffled(trimmed);
+}
+
+function updateRoundDatesFromCalendar(state, tournament) {
+  if (!tournament?.rounds) return;
+  tournament.rounds.forEach((round) => {
+    round.dates = (state.seasonCalendar || [])
+      .filter((event) => event.competitionId === tournament.key && event.round === round.round)
+      .map((event) => event.dateIndex)
+      .sort((a, b) => a - b);
+  });
+}
+
 function setupSeasonTournaments(state) {
-  const cupParticipants = shuffled([...state.firstDivision, ...state.secondDivision]).slice(0, 16).map((team) => ({ id: team.id, name: team.name }));
+  const cupParticipants = normalizeCupParticipants(state.firstDivision.map((team) => ({ id: team.id, name: team.name })), 16);
   state.tournaments.cup = createTournamentTemplate('cup', 'Copa Nacional', cupRoundFormat, cupParticipants);
+  updateRoundDatesFromCalendar(state, state.tournaments.cup);
 
   if (state.season === 1) {
     state.tournaments.champions = null;
@@ -251,6 +263,9 @@ function setupSeasonTournaments(state) {
   state.tournaments.champions = createTournamentTemplate('champions', 'Copa de Campeones', euroRoundFormat, championsParticipants);
   state.tournaments.cupWinners = createTournamentTemplate('cupWinners', 'Copa de Campeones de Copa', euroRoundFormat, cupWinnersParticipants);
   state.tournaments.continental2 = createTournamentTemplate('continental2', 'Copa Continental Secundaria', continentalRoundFormat, contParticipants);
+  updateRoundDatesFromCalendar(state, state.tournaments.champions);
+  updateRoundDatesFromCalendar(state, state.tournaments.cupWinners);
+  updateRoundDatesFromCalendar(state, state.tournaments.continental2);
 }
 
 function applyResult(standings, homeTeam, awayTeam, result) {
@@ -518,8 +533,9 @@ function createPairingsFromEntrants(entrants) {
   for (let i = 0; i < entrants.length; i += 2) {
     const homeRef = entrants[i];
     const awayRef = entrants[i + 1];
-    if (!awayRef) {
-      pairs.push({ homeRef, awayRef: null, byeWinner: homeRef, legs: [] });
+    if (!homeRef && !awayRef) continue;
+    if (!awayRef || !homeRef) {
+      pairs.push({ homeRef, awayRef, byeWinner: homeRef || awayRef, legs: [] });
       continue;
     }
     pairs.push({ homeRef, awayRef, legs: [], winnerRef: null, aggregate: null });
@@ -721,6 +737,20 @@ function assignSeasonPrizeMoney(state, summary, promotedTeams = []) {
   return prizeEvents;
 }
 
+function registerInternationalPalmares(state, competitionKey, competitionName, championName, runnerUpName = null) {
+  if (!championName) return;
+  state.history.internationalPalmares = state.history.internationalPalmares || {};
+  const list = state.history.internationalPalmares[competitionKey] || [];
+  list.push({
+    season: state.season,
+    year: state.year,
+    competition: competitionName,
+    champion: championName,
+    runnerUp: runnerUpName || null,
+  });
+  state.history.internationalPalmares[competitionKey] = list;
+}
+
 function finalizeSeason(state) {
   sortStandings(state.firstStandings);
   sortStandings(state.secondStandings);
@@ -757,6 +787,13 @@ function finalizeSeason(state) {
   };
 
   assignSeasonPrizeMoney(state, summary, promoted);
+
+  const championsFinal = champions?.rounds?.find((r) => r.round === 'Final')?.matches?.[0];
+  const cupWinnersFinal = cupWinners?.rounds?.find((r) => r.round === 'Final')?.matches?.[0];
+  const continentalFinal = continental2?.rounds?.find((r) => r.round === 'Final')?.matches?.[0];
+  registerInternationalPalmares(state, 'champions', 'Copa de Campeones', champions?.championName, championsFinal ? (championsFinal.winnerId === championsFinal.homeTeamId ? championsFinal.awayName : championsFinal.homeName) : null);
+  registerInternationalPalmares(state, 'cupWinners', 'Copa de Campeones de Copa', cupWinners?.championName, cupWinnersFinal ? (cupWinnersFinal.winnerId === cupWinnersFinal.homeTeamId ? cupWinnersFinal.awayName : cupWinnersFinal.homeName) : null);
+  registerInternationalPalmares(state, 'continental2', 'Copa Continental Secundaria', continental2?.championName, continentalFinal ? (continentalFinal.winnerId === continentalFinal.homeTeamId ? continentalFinal.awayName : continentalFinal.homeName) : null);
 
   registerTeamTitle(state, firstChampion.id, 'league', state.season);
   if (cup?.championTeamId) registerTeamTitle(state, cup.championTeamId, 'cup', state.season);
@@ -799,7 +836,9 @@ function finalizeSeason(state) {
     team.lineup = autoPickLineup(team, team.tactics.formation);
   });
 
-  state.history.transfersBySeason[`S${state.season}`] = [...state.transferHistory];
+  const seasonKey = `S${state.season}`;
+  const existingMoves = state.history.transfersBySeason[seasonKey] || [];
+  state.history.transfersBySeason[seasonKey] = [...state.transferHistory, ...existingMoves].slice(0, 500);
   state.transferHistory = [];
 
   state.season += 1;
@@ -822,7 +861,7 @@ function finalizeSeason(state) {
 }
 
 function ensureSeasonSetup(state) {
-  const needsCalendarMigration = !state.seasonCalendar?.length || !state.seasonCalendar[0]?.type || state.calendarVersion !== 2;
+  const needsCalendarMigration = !state.seasonCalendar?.length || !state.seasonCalendar[0]?.type || state.calendarVersion !== 3;
   if (needsCalendarMigration) buildSeasonCalendar(state);
   if (!state.tournaments?.cup || !state.tournaments.cup.rounds?.length || !Array.isArray(state.tournaments.cup.rounds[0]?.dates)) setupSeasonTournaments(state);
   repairInternationalCalendarState(state);
@@ -837,6 +876,9 @@ function repairInternationalCalendarState(state) {
     if (event.status === 'played') event.status = 'completed';
     if (!event.label) event.label = 'Internacional';
   });
+
+  const hasCompositeDates = state.seasonCalendar.some((event, _, list) => list.filter((x) => x.dateIndex === event.dateIndex).length > 1);
+  if (hasCompositeDates) buildSeasonCalendar(state);
 }
 
 function simulateDateByEvent(state, event, allReports) {
@@ -868,8 +910,9 @@ export function simulateMatchday(state) {
   if (state.currentMatchday > state.maxMatchday) return { done: true, message: 'Temporada ya finalizada' };
 
   const dayEvents = listDateEvents(state, state.currentMatchday);
+  const activeEvent = dayEvents[0];
   const allReports = [];
-  dayEvents.forEach((event) => simulateDateByEvent(state, event, allReports));
+  if (activeEvent) simulateDateByEvent(state, activeEvent, allReports);
 
   const matchdaySummary = registerMatchdaySummary(state, allReports);
 
@@ -891,7 +934,7 @@ export function simulateMatchday(state) {
   state.transferWindow = state.currentMatchday < 3 ? 'summer' : state.winterWindowOpened && state.currentMatchday < Math.ceil(state.maxMatchday / 2) + 2 ? 'winter' : 'closed';
   if (state.transferWindow !== 'closed') runAiTransferWindow(state);
 
-  const labels = dayEvents.map((event) => mapCompetitionLabel(event)).join(' + ');
+  const labels = activeEvent ? mapCompetitionLabel(activeEvent) : '';
   return { done: false, message: `Fecha ${simulatedDate} simulada (${labels || 'sin competición'})`, summary: matchdaySummary };
 }
 

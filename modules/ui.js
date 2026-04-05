@@ -1,7 +1,7 @@
 import { competitions } from '../data/trophies.js';
 import { FORMATIONS } from './lineups.js';
 import { getMarketPlayers, isTransferWindowOpen } from './transfers.js';
-import { money, matchCard, positionNames, standingsTable, teamBadge, trophyCard, crestSvg, kitSvg } from './renderers.js';
+import { money, matchCard, positionNames, standingsTable, teamBadge, trophyCard, crestSvg, kitSvg, matchEventIcon } from './renderers.js';
 import { contractSeasonsLeft, getTeamById } from './state.js';
 
 export const views = {
@@ -71,22 +71,24 @@ function summaryCard(summary) {
 
 function matchdayView(state) {
   const day = Math.min(state.currentMatchday, state.maxMatchday);
-  const round1 = state.firstSchedule.find((entry) => entry.matchday === day);
-  const round2 = state.secondSchedule.find((entry) => entry.matchday === day);
   const dayEvents = (state.seasonCalendar || []).filter((event) => event.dateIndex === day);
+  const activeEvent = dayEvents[0];
+  const leagueDay = activeEvent?.type === 'league' ? activeEvent.matchday : null;
+  const round1 = leagueDay ? state.firstSchedule.find((entry) => entry.matchday === leagueDay) : null;
+  const round2 = leagueDay ? state.secondSchedule.find((entry) => entry.matchday === leagueDay) : null;
   const byId = Object.fromEntries([...state.firstDivision, ...state.secondDivision].map((team) => [team.id, team]));
 
   return `<div class="grid">
     ${summaryCard(state.matchdaySummaries.at(-1))}
     <section class="card"><h2>Fecha ${day}</h2><p>${dayEvents.map((event) => tag(event.label || event.type)).join(' ') || 'Sin eventos'}</p></section>
-    <section class="card"><h2>Primera División · Jornada ${day}</h2>${(round1?.matches || []).map((match) => {
-      const result = state.results.d1[day]?.[`${match.home}-${match.away}`];
+    <section class="card"><h2>Primera División ${leagueDay ? `· Jornada ${leagueDay}` : ''}</h2>${(round1?.matches || []).map((match) => {
+      const result = state.results.d1[leagueDay]?.[`${match.home}-${match.away}`];
       return matchCard(byId[match.home], byId[match.away], result, result?.matchId || '');
-    }).join('')}</section>
-    <section class="card"><h2>Segunda División · Jornada ${day}</h2>${(round2?.matches || []).map((match) => {
-      const result = state.results.d2[day]?.[`${match.home}-${match.away}`];
+    }).join('') || '<p class="small">No hay jornada de liga en esta fecha.</p>'}</section>
+    <section class="card"><h2>Segunda División ${leagueDay ? `· Jornada ${leagueDay}` : ''}</h2>${(round2?.matches || []).map((match) => {
+      const result = state.results.d2[leagueDay]?.[`${match.home}-${match.away}`];
       return matchCard(byId[match.home], byId[match.away], result, result?.matchId || '');
-    }).join('')}</section>
+    }).join('') || '<p class="small">No hay jornada de liga en esta fecha.</p>'}</section>
   </div>`;
 }
 
@@ -94,20 +96,26 @@ function matchDetailView(state) {
   const match = state.matchArchive?.[state.selectedMatchId];
   if (!match) return '<section class="card"><p>Selecciona un partido desde la jornada o calendario.</p></section>';
 
+  const eventLabel = (event) => {
+    const kind = event.type === 'penalty' ? 'Penalti'
+      : event.type === 'ownGoal' ? 'Autogol'
+        : event.type === 'yellow' ? 'Amarilla'
+          : event.type === 'red' ? 'Roja'
+            : event.type === 'injury' ? 'Lesión'
+              : 'Gol';
+    return `<li><span>${event.minute}'</span> ${matchEventIcon(event.type)} ${event.playerName} · ${kind}</li>`;
+  };
+
   return `<section class="card match-detail">
     <h2>${match.homeName} <span class="vs">vs</span> ${match.awayName}</h2>
     <p class="small">${match.competitionLabel}${match.round ? ` · ${match.round}` : ''} · Semana ${match.week}</p>
     <div class="hero-score">${match.homeGoals} - ${match.awayGoals}</div>
     <p class="small">Jugador del partido: <strong>${match.mvp}</strong> · Asistencia ${match.attendance?.attendance?.toLocaleString('es-ES') || '—'} (${match.attendance?.occupancy || '—'}%)</p>
     <div class="grid two">
-      <div>
-        <h4>Goles</h4>
-        <ul class="timeline">${match.goals.map((e) => `<li><span>${e.minute}'</span> ⚽ ${e.playerName}</li>`).join('') || '<li>Sin goles registrados</li>'}</ul>
-        <h4>Tarjetas</h4>
-        <ul class="timeline">${match.cards.map((e) => `<li><span>${e.minute}'</span> ${e.type === 'red' ? '🟥' : '🟨'} ${e.playerName}</li>`).join('') || '<li>Sin tarjetas</li>'}</ul>
-        <h4>Lesiones</h4>
-        <ul class="timeline">${match.injuries.map((e) => `<li><span>${e.minute}'</span> 🩹 ${e.playerName}${e.severity ? ` (${e.severity})` : ''}</li>`).join('') || '<li>Sin lesiones</li>'}</ul>
-      </div>
+      <div><h4>${match.homeName}</h4><ul class="timeline">${match.events.filter((e) => e.side === 'home').map(eventLabel).join('') || '<li>Sin incidencias</li>'}</ul></div>
+      <div><h4>${match.awayName}</h4><ul class="timeline">${match.events.filter((e) => e.side === 'away').map(eventLabel).join('') || '<li>Sin incidencias</li>'}</ul></div>
+    </div>
+    <div class="grid two">
       <div>
         <h4>Estadísticas</h4>
         <ul>
@@ -202,6 +210,7 @@ function teamDetailView(state) {
   const avgAttendance = team.stadium.seasonHomeMatches ? Math.round(team.stadium.seasonAttendanceTotal / team.stadium.seasonHomeMatches) : 0;
 
   const financeRows = (team.financialHistory || []).slice(0, 6);
+  const marketRows = (team.marketHistory || []).slice(0, 10);
   return `<div class="grid two">
     <section class="card">
       <div class="club-head">${crestSvg(team, 72)}<div><h2>${team.name}</h2><p>División ${team.division} · Estilo ${team.style}</p></div></div>
@@ -228,6 +237,12 @@ function teamDetailView(state) {
       ${financeRows.map((row) => `<tr><td>${row.text}</td><td>${money(row.amount)}</td><td>${row.season}</td></tr>`).join('') || '<tr><td colspan="3">Sin movimientos recientes.</td></tr>'}
       </tbody></table></div>
     </section>
+    <section class="card">
+      <h3>Movimientos de mercado</h3>
+      <div class="table-wrap"><table><thead><tr><th>Temp.</th><th>Operación</th><th>Jugador</th><th>Origen</th><th>Destino</th><th>Coste</th></tr></thead><tbody>
+      ${marketRows.map((row) => `<tr><td>${row.season}</td><td>${row.operation || row.type}</td><td>${row.playerName || '—'}</td><td>${row.origin || row.fromTeamName || team.name}</td><td>${row.destination || row.toTeamName || team.name}</td><td>${typeof row.fee === 'number' ? money(row.fee) : typeof row.cost === 'number' ? money(row.cost) : '—'}</td></tr>`).join('') || '<tr><td colspan="6">Sin movimientos de mercado registrados.</td></tr>'}
+      </tbody></table></div>
+    </section>
     ${clubHistoryBlock(state, team)}
   </div>`;
 }
@@ -246,16 +261,38 @@ function marketView(state, filters) {
 
 function tournamentBlock(tournament) {
   if (!tournament) return '<article class="card"><p>No disponible en esta temporada.</p></article>';
+  const roundColumn = (round) => `<div class="bracket-col"><h4>${round.round}</h4>${round.matches.map((m) => {
+    const home = m.winnerId === m.homeTeamId ? `<strong>${m.homeName}</strong>` : m.homeName;
+    const away = m.winnerId === m.awayTeamId ? `<strong>${m.awayName}</strong>` : m.awayName;
+    const legs = [m.leg1?.score, m.leg2?.score].filter(Boolean).join(' · ');
+    return `<div class="bracket-match"><div>${home}</div><div>${away}</div><small>${legs || 'Pendiente'}${m.aggregate ? ` · Global ${m.aggregate}` : ''}</small></div>`;
+  }).join('') || '<div class="bracket-match"><small>Pendiente</small></div>'}</div>`;
+
   return `<article class="card">
     <h3>${tournament.title}</h3>
     <p><strong>Campeón:</strong> ${tournament.championName || 'Pendiente'}</p>
-    ${tournament.rounds.map((round) => `<div class="round"><h4>${round.round} · Fechas ${round.dates.join(' / ')}</h4><ul>${round.matches.map((m) => {
-      const home = m.winnerId === m.homeTeamId ? `<strong>${m.homeName}</strong>` : m.homeName;
-      const away = m.winnerId === m.awayTeamId ? `<strong>${m.awayName}</strong>` : m.awayName;
-      const legs = [m.leg1?.score, m.leg2?.score].filter(Boolean).join(' · ');
-      const aggregate = m.aggregate ? ` | Global ${m.aggregate}` : '';
-      return `<li>${home} vs ${away} ${legs ? `(${legs})` : ''}${aggregate}</li>`;
-    }).join('') || '<li>Pendiente</li>'}</ul></div>`).join('')}
+    <div class="bracket">${tournament.rounds.map(roundColumn).join('')}</div>
+  </article>`;
+}
+
+function internationalPalmaresBlock(state) {
+  const data = state.history.internationalPalmares || {};
+  const items = Object.entries(data);
+  if (!items.length) return '<article class="card"><h3>Palmarés internacional</h3><p class="small">Sin ediciones cerradas todavía.</p></article>';
+
+  return `<article class="card"><h3>Palmarés internacional</h3>
+    ${items.map(([key, editions]) => {
+      const totals = editions.reduce((acc, entry) => {
+        acc[entry.champion] = (acc[entry.champion] || 0) + 1;
+        return acc;
+      }, {});
+      return `<div class="round"><h4>${editions[0]?.competition || key}</h4>
+        <p class="small">${Object.entries(totals).map(([club, count]) => `${club} (${count})`).join(' · ')}</p>
+        <div class="table-wrap"><table><thead><tr><th>Temp.</th><th>Campeón</th><th>Subcampeón</th></tr></thead><tbody>
+        ${[...editions].reverse().map((entry) => `<tr><td>${entry.season}</td><td>${entry.champion}</td><td>${entry.runnerUp || '—'}</td></tr>`).join('')}
+        </tbody></table></div>
+      </div>`;
+    }).join('')}
   </article>`;
 }
 
@@ -275,6 +312,7 @@ function cupEuropeView(state) {
       ${tournamentBlock(state.tournaments.cupWinners)}
       ${tournamentBlock(state.tournaments.continental2)}
     </div>
+    ${internationalPalmaresBlock(state)}
     <article class="card"><h3>Ligas europeas ficticias</h3>
     <div class="table-wrap"><table><thead><tr><th>Liga</th><th>Campeón</th><th>Campeón de copa</th></tr></thead><tbody>
     ${(state.europeExternal.leagues || []).map((l) => `<tr><td>${l.name}</td><td>${l.champion}</td><td>${l.cupChampion}</td></tr>`).join('') || '<tr><td colspan="3">Se generarán al cerrar la temporada 1.</td></tr>'}
