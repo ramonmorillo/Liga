@@ -1,38 +1,47 @@
+const COLOR_FAMILIES = {
+  es: ['Roja', 'Azul', 'Verde', 'Dorada'],
+  en: ['Red', 'Blue', 'Green', 'Golden'],
+  fr: ['Rouge', 'Bleue', 'Verte', 'Dorée'],
+  it: ['Rossa', 'Blu', 'Verde', 'Dorata'],
+  de: ['Rot', 'Blau', 'Grün', 'Gold'],
+  pt: ['Vermelha', 'Azul', 'Verde', 'Dourada'],
+};
+
 const LEAGUES = [
-  'Liga Nordia',
-  'Liga Centralia',
-  'Liga Occidentia',
-  'Liga Oranje',
-  'Liga Albion',
-  'Liga Lusitania',
-  'Liga Danubia',
-  'Liga Flandria',
+  { key: 'iberia', country: 'España', language: 'es', baseName: 'Liga' },
+  { key: 'albion', country: 'Inglaterra', language: 'en', baseName: 'League' },
+  { key: 'gaulle', country: 'Francia', language: 'fr', baseName: 'Ligue' },
+  { key: 'italia', country: 'Italia', language: 'it', baseName: 'Lega' },
+  { key: 'teutonia', country: 'Alemania', language: 'de', baseName: 'Liga' },
+  { key: 'lusitania', country: 'Portugal', language: 'pt', baseName: 'Liga' },
 ];
 
 const TOKENS = {
-  Nordia: ['FC Aurora', 'IK Frost', 'Storm BK', 'Nordlys', 'Skarn', 'Vikingur', 'Bris IF', 'Polar SK'],
-  Centralia: ['Dynamo Mitte', 'Union Eisen', 'Blauwerk', 'SpVg Kron', 'TSV Adler', 'Lok Meridian', 'SC Wald', 'Roter Stern'],
-  Occidentia: ['Athletique Ouest', 'Racing Loire', 'US Maritime', 'FC Lumière', 'Stade Tricolore', 'AC Mont', 'Olympique Ciel', 'AS Vendée'],
-  Oranje: ['Oranje Stad', 'VV Delta', 'AZ Polder', 'RKV Tulip', 'Noordhaven', 'Sparta Kanaal', 'FC Windmill', 'SV Maas'],
-  Albion: ['Kingsbridge FC', 'Northport United', 'Wessex Town', 'Redshire', 'Bristol Crown', 'County Rangers', 'Eastford', 'Ironbridge'],
-  Lusitania: ['Sporting Atlântico', 'FC Ribeira', 'Beira Marítima', 'Clube Douro', 'União Minho', 'SC Alvor', 'Lis Sol', 'Porto Norte'],
-  Danubia: ['FK Danub', 'Rapid Karpat', 'Steaua Alba', 'Slavia Most', 'Balkanova', 'SC Pannon', 'Universitatea', 'Dinamo Voda'],
-  Flandria: ['KSV Brug', 'Royal Meers', 'FC Haven', 'Sint Gilde', 'Racing Brel', 'Union Schelde', 'Atletiek Gentia', 'KV Leuvena'],
+  iberia: ['Atlético Brasa', 'Real Mar', 'Unión Sierra', 'Deportivo Sol', 'CD Olivo', 'Racing Costa', 'Sporting Norte', 'CF Valle'],
+  albion: ['Kingsbridge FC', 'Northport United', 'Wessex Town', 'Redshire', 'Bristol Crown', 'County Rangers', 'Eastford', 'Ironbridge'],
+  gaulle: ['Athletique Ouest', 'Racing Loire', 'US Maritime', 'FC Lumière', 'Stade Tricolore', 'AC Mont', 'Olympique Ciel', 'AS Vendée'],
+  italia: ['AC Volta', 'Unione Tirreno', 'Sportiva Dorica', 'Blu Torino', 'Verde Parma', 'Rossa Napoli', 'Atletico Siena', 'FC Ravenna'],
+  teutonia: ['Dynamo Mitte', 'Union Eisen', 'Blauwerk', 'SpVg Kron', 'TSV Adler', 'Lok Meridian', 'SC Wald', 'Roter Stern'],
+  lusitania: ['Sporting Atlântico', 'FC Ribeira', 'Beira Marítima', 'Clube Douro', 'União Minho', 'SC Alvor', 'Lis Sol', 'Porto Norte'],
 };
 
 function rand(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function makeTeamId(leagueName, idx) {
-  return `${leagueName.toLowerCase().replace(/\s+/g, '-')}-t${idx + 1}`;
+function makeTeamId(leagueKey, idx) {
+  return `${leagueKey}-t${idx + 1}`;
 }
 
-function buildLeagueTeams(leagueName) {
-  const key = leagueName.split(' ').at(1);
-  const names = TOKENS[key] || TOKENS.Nordia;
+function leagueColorName(leagueMeta, tier = 0) {
+  const colors = COLOR_FAMILIES[leagueMeta.language] || COLOR_FAMILIES.es;
+  return `${leagueMeta.baseName} ${colors[tier] || colors[0]}`;
+}
+
+function buildLeagueTeams(leagueMeta) {
+  const names = TOKENS[leagueMeta.key] || TOKENS.iberia;
   return names.slice(0, 8).map((name, idx) => ({
-    id: makeTeamId(leagueName, idx),
+    id: makeTeamId(leagueMeta.key, idx),
     name,
     strength: rand(60, 83),
     prestige: rand(48, 82),
@@ -49,8 +58,8 @@ function playMatch(home, away) {
   return { homeGoals, awayGoals };
 }
 
-function simulateLeague(leagueName) {
-  const teams = buildLeagueTeams(leagueName);
+function simulateLeague(leagueMeta) {
+  const teams = buildLeagueTeams(leagueMeta);
   const table = teams.map((team) => ({ teamId: team.id, teamName: team.name, points: 0, gf: 0, ga: 0, gd: 0, wins: 0, draws: 0, losses: 0 }));
 
   for (let i = 0; i < teams.length; i += 1) {
@@ -96,7 +105,12 @@ function simulateLeague(leagueName) {
   const cupChampion = cupTeams.sort((a, b) => b.strength - a.strength + rand(-4, 4))[0];
 
   return {
-    name: leagueName,
+    key: leagueMeta.key,
+    country: leagueMeta.country,
+    language: leagueMeta.language,
+    name: leagueColorName(leagueMeta, 0),
+    divisions: [1, 2, 3, 4].map((tier) => leagueColorName(leagueMeta, tier - 1)),
+    cupName: `${leagueMeta.baseName} ${COLOR_FAMILIES[leagueMeta.language][1]} Cup`,
     teams,
     table,
     champion: table[0]?.teamName,
@@ -119,5 +133,11 @@ export function simulateExternalEuropeSeason(season) {
     continental2: leagues.flatMap((league) => league.europeSlots.continental2.map((row) => ({ source: league.name, teamId: row.teamId, teamName: row.teamName }))),
   };
 
-  return { season, leagues, qualifiers };
+  const competitions = {
+    champions: 'Copa Estelar Dorada',
+    cupWinners: 'Copa de Ganadores Azules',
+    continental2: 'Copa Continental Verde',
+  };
+
+  return { season, leagues, qualifiers, competitions };
 }

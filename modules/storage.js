@@ -46,7 +46,7 @@ export function importGame(file) {
         if (!migrated) throw new Error('Partida incompatible');
         resolve(migrated);
       } catch {
-        reject(new Error('JSON inválido o incompatible con v4'));
+        reject(new Error('JSON inválido o incompatible con v5'));
       }
     };
     reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
