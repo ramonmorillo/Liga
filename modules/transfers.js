@@ -1,4 +1,4 @@
-import { allTeams, getTeamById } from './state.js';
+import { allTeams, createYouthPlayer, getTeamById } from './state.js';
 
 const EU_COUNTRIES = new Set(['España', 'Francia', 'Alemania', 'Italia', 'Portugal', 'Países Bajos', 'Bélgica', 'Croacia']);
 
@@ -153,4 +153,80 @@ export function runAiTransferWindow(state) {
     if (!target) return;
     transferPlayer(state, target.seller.id, buyer.id, target.player.id, Math.random() < 0.3);
   });
+}
+
+
+export function releasePlayer(state, teamId, playerId) {
+  const team = getTeamById(state, teamId);
+  if (!team) return { ok: false, message: 'Equipo no encontrado' };
+
+  const player = team.squad.find((item) => item.id === playerId);
+  if (!player) return { ok: false, message: 'Jugador no encontrado' };
+
+  const minimumSquad = 18;
+  if (team.squad.length <= minimumSquad) return { ok: false, message: `Plantilla mínima (${minimumSquad}) alcanzada` };
+
+  const requiredByPosition = { POR: 2, DEF: 6, MED: 6, DEL: 4 };
+  const byPosition = (position) => team.squad.filter((p) => p.position === position).length;
+  if (byPosition(player.position) <= requiredByPosition[player.position]) {
+    return { ok: false, message: `No puedes liberar al último cupo funcional de ${player.position}` };
+  }
+
+  const remainingContractYears = Math.max(0, (player.contractEndYear || state.year) - state.year);
+  const compensation = Math.round(player.value * (remainingContractYears > 0 ? 0.12 + remainingContractYears * 0.04 : 0.06));
+  if (team.budget < compensation) return { ok: false, message: 'Presupuesto insuficiente para rescisión' };
+
+  team.budget -= compensation;
+  team.squad = team.squad.filter((item) => item.id !== player.id);
+
+  const movement = {
+    season: state.season,
+    year: state.year,
+    window: state.transferWindow,
+    type: 'release',
+    operation: 'Carta de libertad',
+    playerName: `${player.name} ${player.surname}`,
+    fromTeamId: team.id,
+    fromTeamName: team.name,
+    toTeamId: null,
+    toTeamName: 'Libre',
+    origin: team.name,
+    destination: 'Agente libre',
+    fee: -compensation,
+    note: `Rescisión por bajo rendimiento (${player.form}/100 de forma)`,
+  };
+
+  recordMovement(state, movement);
+  recordTeamMovement(team, { ...movement, teamId: team.id, teamName: team.name });
+  team.financialHistory = team.financialHistory || [];
+  team.financialHistory.unshift({
+    id: `release-${state.season}-${team.id}-${player.id}`,
+    season: state.season,
+    year: state.year,
+    matchday: state.currentMatchday,
+    type: 'release',
+    amount: -compensation,
+    text: `Carta de libertad de ${player.name} ${player.surname}`,
+  });
+  team.financialHistory = team.financialHistory.slice(0, 120);
+
+  const mustPromote = team.squad.length < 24 || byPosition(player.position) < requiredByPosition[player.position];
+  if (mustPromote) {
+    const youth = createYouthPlayer(team, state.year, player.position);
+    team.squad.push(youth);
+    recordTeamMovement(team, {
+      season: state.season,
+      year: state.year,
+      type: 'youth-promotion',
+      operation: 'Promoción',
+      playerName: `${youth.name} ${youth.surname}`,
+      origin: 'Cantera',
+      destination: team.name,
+      fee: 0,
+      note: 'Promoción automática para cubrir baja tras carta de libertad',
+    });
+  }
+
+  asNews(state, `${team.name} concede la carta de libertad a ${player.name} ${player.surname}.`, 'media');
+  return { ok: true, message: `Carta de libertad ejecutada. Coste: €${compensation.toLocaleString('es-ES')}` };
 }

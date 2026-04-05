@@ -69,3 +69,9 @@ th { color: var(--muted); font-size: 0.85rem; text-align: left; }
 }
 
 .tag { display:inline-block; background:#16405f; border:1px solid #2f6f96; border-radius:999px; padding:0.12rem 0.45rem; margin-right:0.25rem; font-size:0.75rem; }
+
+.tabs { display: flex; gap: 0.45rem; margin-top: 0.8rem; flex-wrap: wrap; }
+.player-focus { display: flex; gap: 0.45rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.7rem; }
+.trophy-grid.compact { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.5rem; margin-bottom: 0.75rem; }
+.trophy-row { display: flex; gap: 0.55rem; align-items: center; padding: 0.45rem; border: 1px solid color-mix(in srgb, var(--accent), #fff 16%); border-radius: 10px; background: rgba(255,255,255,0.02); }
+.trophy-mark { font-size: 1.25rem; }
