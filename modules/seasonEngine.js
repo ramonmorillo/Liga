@@ -354,8 +354,65 @@ function playLeagueDate(state, dateEvent, divisionKey) {
 
 function getTournamentTeam(state, ref) {
   if (!ref) return null;
-  if (ref.id?.startsWith('ext:')) return { id: ref.id, name: ref.name, strength: 72, prestige: 66, lineup: { starters: [], bench: [] }, squad: [] };
+  if (ref.id?.startsWith('ext:')) return getExternalTournamentTeam(state, ref);
   return getTeamById(state, ref.id);
+}
+
+function buildExternalPlayers(teamId) {
+  const shape = [
+    ['POR', 2],
+    ['DEF', 6],
+    ['MED', 6],
+    ['DEL', 4],
+  ];
+  const players = [];
+  shape.forEach(([position, amount]) => {
+    for (let i = 0; i < amount; i += 1) {
+      players.push({
+        id: `${teamId}-${position}-${i + 1}`,
+        name: position === 'POR' ? 'Portero' : position === 'DEF' ? 'Defensa' : position === 'MED' ? 'Medio' : 'Delantero',
+        surname: `#${i + 1}`,
+        position,
+        overall: 68 + Math.floor(Math.random() * 12),
+        form: 70 + Math.floor(Math.random() * 18),
+        energy: 72 + Math.floor(Math.random() * 16),
+        morale: 70 + Math.floor(Math.random() * 16),
+      });
+    }
+  });
+  return players;
+}
+
+function getExternalTournamentTeam(state, ref) {
+  state._externalTournamentTeams = state._externalTournamentTeams || {};
+  if (state._externalTournamentTeams[ref.id]) return state._externalTournamentTeams[ref.id];
+
+  const teamId = ref.id;
+  const squad = buildExternalPlayers(teamId);
+  const starters = [];
+  const fill = (position, amount) => {
+    starters.push(...squad.filter((player) => player.position === position).slice(0, amount).map((player) => player.id));
+  };
+  fill('POR', 1);
+  fill('DEF', 4);
+  fill('MED', 3);
+  fill('DEL', 3);
+
+  const team = {
+    id: teamId,
+    name: ref.name || 'Equipo internacional',
+    strength: 72 + Math.floor(Math.random() * 8),
+    prestige: 64 + Math.floor(Math.random() * 14),
+    style: 'Transiciones',
+    colors: ['#1f2937', '#d1d5db'],
+    fanMood: 'expectante',
+    stadium: { name: `${ref.name || 'Internacional'} Arena`, capacity: 42000 },
+    lineup: { formation: '4-3-3', starters, bench: [] },
+    squad,
+  };
+
+  state._externalTournamentTeams[ref.id] = team;
+  return team;
 }
 
 function ensureTieBreak(baseResult) {
@@ -459,6 +516,7 @@ function playTournamentEvent(state, tournament, dateEvent) {
     const homeLineup = homeTeam?.lineup?.starters?.length ? homeTeam.lineup : { starters: [], bench: [] };
     const awayLineup = awayTeam?.lineup?.starters?.length ? awayTeam.lineup : { starters: [], bench: [] };
 
+    if (!homeTeam || !awayTeam) return;
     const raw = simulateMatch(homeTeam, awayTeam, homeLineup, awayLineup, { competitionLabel: tournament.title });
 
     let resolved = { ...raw, extraTime: false, penalties: null, resolutionText: null };
@@ -715,6 +773,18 @@ function ensureSeasonSetup(state) {
   const needsCalendarMigration = !state.seasonCalendar?.length || !state.seasonCalendar[0]?.type || state.calendarVersion !== 2;
   if (needsCalendarMigration) buildSeasonCalendar(state);
   if (!state.tournaments?.cup || !state.tournaments.cup.rounds?.length || !Array.isArray(state.tournaments.cup.rounds[0]?.dates)) setupSeasonTournaments(state);
+  repairInternationalCalendarState(state);
+}
+
+function repairInternationalCalendarState(state) {
+  if (!Array.isArray(state.seasonCalendar)) return;
+  const aliases = new Set(['continental', 'european', 'europe']);
+  state.seasonCalendar.forEach((event) => {
+    if (aliases.has(event.type)) event.type = 'international';
+    if (event.type !== 'international') return;
+    if (event.status === 'played') event.status = 'completed';
+    if (!event.label) event.label = 'Internacional';
+  });
 }
 
 function simulateDateByEvent(state, event, allReports) {
@@ -722,19 +792,19 @@ function simulateDateByEvent(state, event, allReports) {
     const firstReport = playLeagueDate(state, event, 'd1');
     const secondReport = playLeagueDate(state, event, 'd2');
     allReports.push(...firstReport, ...secondReport);
-    event.status = 'played';
+    event.status = 'completed';
     return;
   }
 
   if (event.type === 'cup') {
     playTournamentEvent(state, state.tournaments.cup, event);
-    event.status = 'played';
+    event.status = 'completed';
     return;
   }
 
   if (event.type === 'international') {
     playTournamentEvent(state, state.tournaments[event.competitionId], event);
-    event.status = 'played';
+    event.status = 'completed';
     return;
   }
 

@@ -136,7 +136,7 @@ function calendarView(state) {
       <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Competiciones</th><th>Estado</th><th></th></tr></thead><tbody>
       ${Object.keys(grouped).map(Number).sort((a, b) => a - b).map((dateKey) => {
         const events = grouped[dateKey];
-        const isDone = events.every((event) => event.status === 'played' || event.status === 'idle');
+        const isDone = events.every((event) => ['played', 'completed', 'idle'].includes(event.status));
         return `<tr>
           <td>${dateKey}</td>
           <td>${events.map((event) => tag(`${event.label} · ${event.round}${event.leg > 1 ? ` (V${event.leg})` : ''}`)).join(' ')}</td>
