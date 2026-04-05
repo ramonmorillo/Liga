@@ -131,6 +131,20 @@ function bindViewActions() {
     });
   });
 
+  root.querySelector('[data-action="history-season"]')?.addEventListener('change', (event) => {
+    app.state.ui = app.state.ui || {};
+    app.state.ui.historySeason = Number(event.target.value);
+    repaint();
+  });
+
+  root.querySelectorAll('[data-action="history-division"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      app.state.ui = app.state.ui || {};
+      app.state.ui.historyDivision = button.dataset.division;
+      repaint();
+    });
+  });
+
   root.querySelectorAll('[data-action="release-player"]').forEach((button) => {
     button.addEventListener('click', () => {
       const team = getTeamById(app.state, button.dataset.team);
