@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Liga Manager MVP</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <h1>Liga Manager</h1>
+        <nav id="main-nav" class="nav"></nav>
+        <div class="sidebar-actions">
+          <button id="btn-new-game" class="btn danger">Nueva partida</button>
+          <button id="btn-export" class="btn">Exportar partida JSON</button>
+          <label class="btn file-btn">
+            Importar partida JSON
+            <input id="import-file" type="file" accept="application/json" />
+          </label>
+        </div>
+      </aside>
+      <main class="content">
+        <header class="topbar">
+          <span id="season-label"></span>
+          <span id="matchday-label"></span>
+        </header>
+        <section id="view-root"></section>
+      </main>
+    </div>
+
+    <dialog id="player-modal" class="modal">
+      <article id="player-modal-content"></article>
+      <button id="player-modal-close" class="btn">Cerrar</button>
+    </dialog>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
