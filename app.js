@@ -2,7 +2,7 @@ import { render, renderNav, views } from './modules/ui.js';
 import { clearGame, ensureGame, exportGame, importGame, saveGame } from './modules/storage.js';
 import { autoPickLineup } from './modules/lineups.js';
 import { allTeams, createNewGame, getTeamById } from './modules/state.js';
-import { dismissCoach, initializeSeasonStructures, simulateMatchday } from './modules/seasonEngine.js';
+import { dismissCoach, hireCoach, initializeSeasonStructures, simulateMatchday } from './modules/seasonEngine.js';
 import { releasePlayer, transferPlayer } from './modules/transfers.js';
 
 const app = {
@@ -92,6 +92,16 @@ function bindViewActions() {
     const result = dismissCoach(app.state, teamId);
     alert(result.message);
     repaint();
+  });
+
+  root.querySelectorAll('[data-action="hire-coach"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const teamId = button.dataset.team;
+      const coachId = button.dataset.coach;
+      const result = hireCoach(app.state, teamId, coachId);
+      alert(result.message);
+      repaint();
+    });
   });
 
   root.querySelector('[data-action="formation"]')?.addEventListener('change', (event) => {

@@ -22,6 +22,15 @@ export function countNonEu(team) {
   return team.squad.filter(isNonEu).length;
 }
 
+export function isPlayerMarketEligible(player, stateYear) {
+  if (!player) return false;
+  if (player.intransferible) return false;
+  if (player.playerStatus?.current === 'lesión grave') return false;
+  if (typeof player.contractEndYear !== 'number') return false;
+  const yearsLeft = Math.max(0, player.contractEndYear - stateYear);
+  return yearsLeft <= 1;
+}
+
 export function getMarketPlayers(state, filters = {}) {
   const userId = state.userTeamId;
   const players = allTeams(state)
@@ -29,6 +38,7 @@ export function getMarketPlayers(state, filters = {}) {
     .flatMap((team) => team.squad.map((player) => ({ ...player, teamId: team.id, teamName: team.name })));
 
   return players.filter((player) => {
+    if (!isPlayerMarketEligible(player, state.year)) return false;
     if (filters.position && player.position !== filters.position) return false;
     if (filters.minOverall && player.overall < Number(filters.minOverall)) return false;
     if (filters.maxAge && player.age > Number(filters.maxAge)) return false;
@@ -70,6 +80,7 @@ export function transferPlayer(state, fromTeamId, toTeamId, playerId, payClause 
 
   const player = fromTeam.squad.find((item) => item.id === playerId);
   if (!player) return { ok: false, message: 'Jugador no encontrado' };
+  if (!isPlayerMarketEligible(player, state.year)) return { ok: false, message: 'Jugador no disponible: no está en último año de contrato' };
   if (countNonEu(toTeam) >= 3 && isNonEu(player)) return { ok: false, message: 'Límite de 3 extracomunitarios alcanzado' };
   if (toTeam.squad.length >= 30) return { ok: false, message: 'Plantilla compradora llena' };
   if (fromTeam.squad.length <= 18) return { ok: false, message: 'Plantilla vendedora insuficiente' };
@@ -141,6 +152,7 @@ export function runAiTransferWindow(state) {
       .filter((seller) => seller.id !== buyer.id)
       .flatMap((seller) => seller.squad.map((player) => ({ player, seller })))
       .filter(({ player, seller }) => player.position === targetPosition && seller.squad.length > 19)
+      .filter(({ player }) => isPlayerMarketEligible(player, state.year))
       .sort((a, b) => b.player.potential - a.player.potential)
       .slice(0, 20);
 
