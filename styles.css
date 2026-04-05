@@ -54,6 +54,11 @@ th { color: var(--muted); font-size: 0.85rem; text-align: left; }
 .match-detail .vs { margin: 0 0.7rem; color: var(--muted); }
 .round { margin-top: 0.6rem; }
 .round h4 { margin: 0.2rem 0; }
+.bracket { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.55rem; align-items: start; }
+.bracket-col { background: rgba(13, 19, 33, 0.5); border: 1px solid var(--border); border-radius: 10px; padding: 0.45rem; }
+.bracket-col h4 { margin: 0 0 0.35rem; font-size: 0.9rem; }
+.bracket-match { border: 1px solid #30405f; border-radius: 8px; padding: 0.35rem; margin-bottom: 0.35rem; background: rgba(255, 255, 255, 0.02); }
+.bracket-match small { color: var(--muted); }
 .club-head { display: flex; align-items: center; gap: 0.8rem; }
 .kit-row { display: flex; gap: 1.2rem; align-items: flex-start; }
 .crest { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }

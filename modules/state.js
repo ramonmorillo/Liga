@@ -6,7 +6,7 @@ import { generateDoubleRoundRobin } from './scheduler.js';
 import { autoPickLineup } from './lineups.js';
 import { normalizeExternalLeagueData } from './europe.js';
 
-export const CURRENT_STATE_VERSION = 6;
+export const CURRENT_STATE_VERSION = 7;
 const START_YEAR = 2026;
 
 const squadShape = [...Array(3).fill('POR'), ...Array(8).fill('DEF'), ...Array(8).fill('MED'), ...Array(5).fill('DEL')];
@@ -100,6 +100,22 @@ function createPlayer(teamId, idx, position, base, nonEuRemaining, age = rand(17
   };
 }
 
+export function createYouthPlayer(team, stateYear, position = 'MED') {
+  const youth = createPlayer(
+    team.id,
+    team.squad.length + 1,
+    position,
+    Math.max(49, team.strength - 10),
+    0,
+    17,
+    stateYear,
+  );
+  youth.potential = Math.max(youth.overall + 4, Math.min(84, youth.overall + rand(6, 12)));
+  youth.contractEndYear = stateYear + 3;
+  youth.history.clubs.push(team.id);
+  return youth;
+}
+
 function setupTeam(raw, idx, division) {
   const id = `${division === 1 ? 'd1' : 'd2'}-${idx + 1}`;
   const team = {
@@ -114,6 +130,7 @@ function setupTeam(raw, idx, division) {
     budget: raw.budget * 1000000,
     finances: { transferIn: 0, transferOut: 0, prizes: 0 },
     financialHistory: [],
+    marketHistory: [],
     squad: [],
     tactics: { formation: '4-3-3' },
     lineup: { formation: '4-3-3', starters: [], bench: [] },
@@ -192,6 +209,7 @@ export function createNewGame() {
       coachChanges: [],
       globalBySeason: [],
       financialEvents: [],
+      internationalPalmares: {},
     },
     prizeLedger: {},
     europeSlots: { champions: [], cupWinners: [], continental2: [] },
@@ -243,6 +261,7 @@ function enrichLegacyState(raw) {
   raw.history.clubTitleLog = raw.history.clubTitleLog || [];
   raw.history.globalBySeason = raw.history.globalBySeason || [];
   raw.history.financialEvents = raw.history.financialEvents || [];
+  raw.history.internationalPalmares = raw.history.internationalPalmares || {};
   raw.prizeLedger = raw.prizeLedger || {};
   raw.tournaments = raw.tournaments || {};
   raw.europeExternal = raw.europeExternal || { leagues: [], history: [] };
@@ -252,6 +271,7 @@ function enrichLegacyState(raw) {
   allTeams(raw).forEach((team) => {
     if (!team.finances) team.finances = { transferIn: 0, transferOut: 0, prizes: 0 };
     if (!team.financialHistory) team.financialHistory = [];
+    if (!team.marketHistory) team.marketHistory = [];
     if (!team.coach) team.coach = createCoachProfile();
     if (!team.stadium || !team.kits || !team.crest) {
       const identity = createIdentity(team, team.division || 1);
@@ -311,7 +331,29 @@ export function resetSeasonStats(team) {
 }
 
 export function ageAndEvolveSquads(state) {
+  const marketSeasonKey = `S${state.season}`;
+  state.history.transfersBySeason[marketSeasonKey] = state.history.transfersBySeason[marketSeasonKey] || [];
+
+  const logSquadMovement = (team, payload) => {
+    const move = {
+      season: state.season,
+      year: state.year,
+      teamId: team.id,
+      teamName: team.name,
+      ...payload,
+    };
+    team.marketHistory = team.marketHistory || [];
+    team.marketHistory.unshift(move);
+    team.marketHistory = team.marketHistory.slice(0, 220);
+    state.history.transfersBySeason[marketSeasonKey].unshift(move);
+    state.history.transfersBySeason[marketSeasonKey] = state.history.transfersBySeason[marketSeasonKey].slice(0, 500);
+  };
+
+  const requiredByPosition = { POR: 2, DEF: 6, MED: 6, DEL: 4 };
+  const renewalCost = (player) => Math.max(180000, Math.round(player.value * 0.04));
+
   allTeams(state).forEach((team) => {
+    const leftByContract = [];
     team.squad.forEach((player) => {
       player.age += 1;
       const growth = player.age < 24 ? rand(0, 3) : player.age > 31 ? rand(-3, 0) : rand(-1, 1);
@@ -322,19 +364,71 @@ export function ageAndEvolveSquads(state) {
       player.history.seasons += 1;
       player.history.goals += player.seasonGoals;
       if (!player.contractEndYear || player.contractEndYear <= state.year) {
-        player.contractEndYear = state.year + rand(1, 4);
+        const renewAmount = renewalCost(player);
+        if (team.budget >= renewAmount) {
+          team.budget -= renewAmount;
+          player.contractEndYear = state.year + rand(1, 4);
+        } else {
+          player.leftByContract = true;
+          leftByContract.push(player);
+          logSquadMovement(team, {
+            type: 'contract-expired',
+            operation: 'Salida',
+            playerName: `${player.name} ${player.surname}`,
+            role: player.position,
+            cost: 0,
+            note: 'No renovado por falta de presupuesto',
+          });
+        }
       }
     });
 
-    team.squad = team.squad.filter((player) => !player.retired);
+    team.squad = team.squad.filter((player) => !player.retired && !player.leftByContract);
+
+    leftByContract.forEach((departed) => {
+      const cannotAffordMarket = team.budget < Math.max(2000000, departed.value * 0.45);
+      if (!cannotAffordMarket) return;
+      const promoted = createYouthPlayer(team, state.year, departed.position);
+      team.squad.push(promoted);
+      logSquadMovement(team, {
+        type: 'youth-promotion',
+        operation: 'Promoción',
+        playerName: `${promoted.name} ${promoted.surname}`,
+        role: promoted.position,
+        cost: 0,
+        note: `Ascenso juvenil automático (17 años) para cubrir baja de ${departed.name} ${departed.surname}`,
+      });
+    });
+
+    const byPosition = (pos) => team.squad.filter((p) => p.position === pos).length;
+    Object.entries(requiredByPosition).forEach(([position, minimum]) => {
+      while (byPosition(position) < minimum) {
+        const promoted = createYouthPlayer(team, state.year, position);
+        team.squad.push(promoted);
+        logSquadMovement(team, {
+          type: 'youth-promotion',
+          operation: 'Promoción',
+          playerName: `${promoted.name} ${promoted.surname}`,
+          role: position,
+          cost: 0,
+          note: 'Promoción para mantener mínimo funcional de plantilla',
+        });
+      }
+    });
 
     while (team.squad.length < 24) {
       const posPool = ['POR', 'DEF', 'DEF', 'MED', 'MED', 'DEL'];
       const position = pick(posPool);
-      const youth = createPlayer(team.id, team.squad.length, position, Math.max(52, team.strength - 6), 1, rand(17, 20), state.year);
-      youth.potential = Math.min(95, youth.overall + rand(4, 11));
-      youth.history.clubs.push(team.id);
+      const youth = createYouthPlayer(team, state.year, position);
       team.squad.push(youth);
+      logSquadMovement(team, {
+        type: 'youth-promotion',
+        operation: 'Promoción',
+        playerName: `${youth.name} ${youth.surname}`,
+        role: position,
+        cost: 0,
+        note: 'Promoción de cantera para completar plantilla',
+      });
     }
 
     team.lineup = autoPickLineup(team, team.tactics.formation);

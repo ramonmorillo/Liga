@@ -44,6 +44,12 @@ function recordMovement(state, payload) {
   state.transferHistory = state.transferHistory.slice(0, 220);
 }
 
+function recordTeamMovement(team, payload) {
+  team.marketHistory = team.marketHistory || [];
+  team.marketHistory.unshift(payload);
+  team.marketHistory = team.marketHistory.slice(0, 220);
+}
+
 function asNews(state, message, importance = 'media') {
   state.recentNews.unshift({
     season: state.season,
@@ -83,17 +89,36 @@ export function transferPlayer(state, fromTeamId, toTeamId, playerId, payClause 
 
   const movement = {
     season: state.season,
+    year: state.year,
     window: state.transferWindow,
+    type: 'transfer',
     playerName: `${player.name} ${player.surname}`,
     fromTeamId: fromTeam.id,
     fromTeamName: fromTeam.name,
     toTeamId: toTeam.id,
     toTeamName: toTeam.name,
+    origin: fromTeam.name,
+    destination: toTeam.name,
+    operation: 'Traspaso',
     fee: transferFee,
     clauseExecuted: payClause,
     notable: transferFee > 22000000 || payClause,
   };
   recordMovement(state, movement);
+  recordTeamMovement(toTeam, {
+    ...movement,
+    operation: 'Fichaje',
+    note: `Llega desde ${fromTeam.name}`,
+    teamId: toTeam.id,
+    teamName: toTeam.name,
+  });
+  recordTeamMovement(fromTeam, {
+    ...movement,
+    operation: 'Venta',
+    note: `Sale hacia ${toTeam.name}`,
+    teamId: fromTeam.id,
+    teamName: fromTeam.name,
+  });
 
   if (movement.notable) {
     asNews(state, `${movement.playerName} ficha por ${toTeam.name} por ${transferFee.toLocaleString('es-ES')}€${payClause ? ' (cláusula)' : ''}.`, 'alta');
