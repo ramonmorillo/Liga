@@ -1,136 +1,183 @@
-import { getTeamLineAverages } from './generator.js';
+import { competitions } from '../data/trophies.js';
+import { FORMATIONS } from './lineups.js';
+import { getMarketPlayers, isTransferWindowOpen } from './transfers.js';
+import { money, matchCard, positionNames, standingsTable, teamBadge, trophyCard } from './renderers.js';
+import { getTeamById } from './state.js';
 
 export const views = {
   dashboard: 'dashboard',
-  standings: 'standings',
-  teams: 'teams',
   matchday: 'matchday',
+  standings1: 'standings1',
+  standings2: 'standings2',
+  teams: 'teams',
   teamDetail: 'teamDetail',
+  market: 'market',
+  cupEurope: 'cupEurope',
+  history: 'history',
+  endSeason: 'endSeason',
 };
-
-const positionLabel = { POR: 'Portero', DEF: 'Defensa', MED: 'Centrocampista', DEL: 'Delantero' };
-
-const money = (v) => `€${Math.round(v).toLocaleString('es-ES')}`;
-
-function teamBadge(team) {
-  return `<span class="team-chip"><span class="dot" style="background:${team.colors[0]}"></span>${team.name}</span>`;
-}
 
 export function renderNav(nav, activeView, onNavigate) {
   const items = [
     [views.dashboard, 'Dashboard'],
-    [views.standings, 'Clasificación'],
-    [views.matchday, 'Jornada'],
+    [views.matchday, 'Jornada / Partidos'],
+    [views.standings1, 'Clasificación Primera'],
+    [views.standings2, 'Clasificación Segunda'],
     [views.teams, 'Equipos'],
+    [views.market, 'Mercado'],
+    [views.cupEurope, 'Copa + Europa'],
+    [views.history, 'Historia / Palmarés'],
+    [views.endSeason, 'Fin de temporada'],
   ];
-  nav.innerHTML = items.map(([key, label]) => `<button class="btn ${activeView === key ? 'primary' : ''}" data-view="${key}">${label}</button>`).join('');
-  nav.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => onNavigate(b.dataset.view)));
-}
 
-export function render(root, app, handlers) {
-  const { view, selectedTeamId, state } = app;
-  if (view === views.dashboard) root.innerHTML = dashboardView(state);
-  if (view === views.standings) root.innerHTML = standingsView(state.standings, state.firstDivision);
-  if (view === views.teams) root.innerHTML = teamsView(state);
-  if (view === views.matchday) root.innerHTML = matchdayView(state);
-  if (view === views.teamDetail) {
-    const team = [...state.firstDivision, ...state.secondDivision].find((t) => t.id === selectedTeamId);
-    root.innerHTML = team ? teamDetailView(team) : '<p>Equipo no encontrado.</p>';
-  }
-
-  root.querySelector('#simulate-btn')?.addEventListener('click', handlers.onSimulate);
-  root.querySelectorAll('[data-team]').forEach((el) => el.addEventListener('click', () => handlers.onTeamSelect(el.dataset.team)));
-  root.querySelectorAll('.player-row').forEach((row) => row.addEventListener('click', () => handlers.onPlayerSelect(row.dataset.team, row.dataset.player)));
+  nav.innerHTML = items.map(([key, label]) => `<button class="btn ${key === activeView ? 'primary' : ''}" data-view="${key}">${label}</button>`).join('');
+  nav.querySelectorAll('[data-view]').forEach((btn) => btn.addEventListener('click', () => onNavigate(btn.dataset.view)));
 }
 
 function dashboardView(state) {
-  const top = state.standings.slice(0, 6);
-  return `
-  <div class="grid two">
+  const userTeam = getTeamById(state, state.userTeamId);
+  return `<div class="grid two">
     <section class="card">
-      <h2>Estado de temporada</h2>
-      <p class="small">Jornada ${state.currentMatchday} de ${state.maxMatchday}</p>
-      <button id="simulate-btn" class="btn primary" ${state.currentMatchday > state.maxMatchday ? 'disabled' : ''}>Simular jornada</button>
+      <h2>Dashboard</h2>
+      <p>Temporada ${state.season} · Año ${state.year}</p>
+      <p>Equipo controlado: <strong>${userTeam?.name || '—'}</strong></p>
+      <p>Mercado: <strong>${isTransferWindowOpen(state) ? state.transferWindow : 'cerrado'}</strong></p>
+      <button class="btn primary" data-action="simulate">Simular jornada</button>
+      <button class="btn" data-action="auto-lineups">Restaurar alineaciones óptimas</button>
     </section>
     <section class="card">
       <h2>Siguiente jornada</h2>
-      ${nextMatchdaySnippet(state)}
-    </section>
-  </div>
-  <section class="card" style="margin-top:.9rem">
-    <h2>Clasificación resumida</h2>
-    ${standingsTable(top)}
-  </section>`;
-}
-
-function standingsView(standings, teams) {
-  return `<section class="card"><h2>Clasificación Primera División</h2>${standingsTable(standings, teams)}</section>`;
-}
-
-function standingsTable(rows, teams = null) {
-  const resolve = (id) => teams?.find((t) => t.id === id)?.name || id;
-  return `<div class="table-wrap"><table><thead><tr><th>#</th><th>Equipo</th><th>Pts</th><th>V</th><th>E</th><th>D</th><th>GF</th><th>GC</th><th>DG</th></tr></thead>
-  <tbody>${rows.map((r, i) => `<tr><td>${r.position || i + 1}</td><td>${resolve(r.teamId)}</td><td>${r.points}</td><td>${r.wins}</td><td>${r.draws}</td><td>${r.losses}</td><td>${r.gf}</td><td>${r.ga}</td><td>${r.gd}</td></tr>`).join('')}</tbody></table></div>`;
-}
-
-function teamsView(state) {
-  const block = (title, teams) => `
-    <section class="card"><h2>${title}</h2><div class="table-wrap"><table><thead><tr><th>Equipo</th><th>Estilo</th><th>Prestigio</th><th>Fuerza</th><th>División</th></tr></thead>
-    <tbody>${teams.map((t) => `<tr><td><button class="btn" data-team="${t.id}">${teamBadge(t)}</button></td><td>${t.style}</td><td>${t.prestige}</td><td>${t.strength}</td><td>${t.division}</td></tr>`).join('')}</tbody></table></div></section>`;
-  return `<div class="grid">${block('Primera División', state.firstDivision)}${block('Segunda División', state.secondDivision)}</div>`;
-}
-
-function teamDetailView(team) {
-  const lines = getTeamLineAverages(team);
-  return `<div class="grid two">
-    <section class="card">
-      <h2>${teamBadge(team)} — ${team.name}</h2>
-      <p><strong>División:</strong> ${team.division}</p>
-      <p><strong>Prestigio:</strong> ${team.prestige}</p>
-      <p><strong>Presupuesto:</strong> ${team.budget}</p>
-      <p><strong>Estilo:</strong> ${team.style}</p>
-      <p><strong>Medias por línea:</strong> POR ${lines.POR} · DEF ${lines.DEF} · MED ${lines.MED} · DEL ${lines.DEL}</p>
-    </section>
-    <section class="card">
-      <h2>Plantilla (24)</h2>
-      <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Pos</th><th>Edad</th><th>Nac.</th><th>Med</th><th>Pot</th></tr></thead>
-      <tbody>${team.squad.map((p) => `<tr class="player-row" data-team="${team.id}" data-player="${p.id}"><td>${p.name} ${p.surname}</td><td>${positionLabel[p.position]}</td><td>${p.age}</td><td>${p.nationality}</td><td>${p.overall}</td><td>${p.potential}</td></tr>`).join('')}</tbody></table></div>
+      ${nextMatches(state)}
     </section>
   </div>`;
 }
 
+function nextMatches(state) {
+  const day = state.firstSchedule.find((entry) => entry.matchday === state.currentMatchday);
+  const byId = Object.fromEntries([...state.firstDivision, ...state.secondDivision].map((team) => [team.id, team]));
+  if (!day) return '<p class="small">No hay partidos pendientes.</p>';
+  return `<ul>${day.matches.slice(0, 8).map((match) => `<li>${byId[match.home].name} vs ${byId[match.away].name}</li>`).join('')}</ul>`;
+}
+
 function matchdayView(state) {
-  const day = state.schedule.find((d) => d.matchday === Math.min(state.currentMatchday, state.maxMatchday));
-  const resultSet = state.results[day?.matchday] || {};
-  const teams = [...state.firstDivision, ...state.secondDivision];
-  const byId = (id) => teams.find((t) => t.id === id);
-  return `<section class="card"><h2>Jornada ${day?.matchday || '-'}</h2><div class="grid">
-  ${(day?.matches || []).map((m) => {
-    const res = resultSet[`${m.home}_${m.away}`];
-    return `<article class="card"><div class="flex"><strong>${teamBadge(byId(m.home))}</strong><span>vs</span><strong>${teamBadge(byId(m.away))}</strong></div>
-    ${res ? `<p><strong>${res.homeGoals} - ${res.awayGoals}</strong></p><p class="small">Posesión ${res.homePossession}%-${res.awayPossession}% · Tiros ${res.homeShots}-${res.awayShots} · A puerta ${res.homeShotsOnTarget}-${res.awayShotsOnTarget}</p>
-    <p class="small">Goleadores local: ${res.homeScorers.join(', ') || '—'}</p><p class="small">Goleadores visitante: ${res.awayScorers.join(', ') || '—'}</p>` : '<p class="small">Pendiente de simulación</p>'}
-    </article>`;
-  }).join('')}</div></section>`;
+  const day = Math.min(state.currentMatchday, state.maxMatchday);
+  const round1 = state.firstSchedule.find((entry) => entry.matchday === day);
+  const round2 = state.secondSchedule.find((entry) => entry.matchday === day);
+  const byId = Object.fromEntries([...state.firstDivision, ...state.secondDivision].map((team) => [team.id, team]));
+
+  return `<div class="grid">
+    <section class="card"><h2>Primera División · Jornada ${day}</h2>${(round1?.matches || []).map((match) => matchCard(byId[match.home], byId[match.away], state.results.d1[day]?.[`${match.home}-${match.away}`])).join('')}</section>
+    <section class="card"><h2>Segunda División · Jornada ${day}</h2>${(round2?.matches || []).map((match) => matchCard(byId[match.home], byId[match.away], state.results.d2[day]?.[`${match.home}-${match.away}`])).join('')}</section>
+  </div>`;
 }
 
-function nextMatchdaySnippet(state) {
-  const day = state.schedule.find((d) => d.matchday === state.currentMatchday);
-  if (!day) return '<p class="small">Temporada completada.</p>';
-  const teams = state.firstDivision;
-  const byId = (id) => teams.find((t) => t.id === id);
-  return `<ul>${day.matches.slice(0, 4).map((m) => `<li>${byId(m.home).name} vs ${byId(m.away).name}</li>`).join('')}</ul>`;
+function teamsView(state) {
+  const block = (title, teams) => `<section class="card"><h3>${title}</h3><div class="table-wrap"><table><thead><tr><th>Equipo</th><th>Div</th><th>Estilo</th><th>Perfil</th><th>Presupuesto</th><th></th></tr></thead><tbody>
+  ${teams.map((team) => `<tr><td>${teamBadge(team)}</td><td>${team.division}</td><td>${team.style}</td><td>${team.profile}</td><td>${money(team.budget)}</td><td><button class="btn" data-team="${team.id}" data-action="team-detail">Ver</button></td></tr>`).join('')}
+  </tbody></table></div></section>`;
+
+  return `<div class="grid">${block('Primera División', state.firstDivision)}${block('Segunda División', state.secondDivision)}</div>`;
 }
 
-export function showPlayerModal(modal, player, teamName) {
-  modal.querySelector('#player-modal-content').innerHTML = `
-    <h3>${player.name} ${player.surname}</h3>
-    <p class="small">${teamName}</p>
-    <p>Edad: ${player.age} · Nacionalidad: ${player.nationality}</p>
-    <p>Posición: ${positionLabel[player.position]}</p>
-    <p>Media: ${player.overall} · Potencial: ${player.potential}</p>
-    <p>Forma: ${player.form} · Energía: ${player.energy} · Moral: ${player.morale}</p>
-    <p>Valor: ${money(player.value)} · Cláusula: ${money(player.clause)}</p>
-    <p>Extracomunitario: <strong>${player.nonEu ? 'Sí' : 'No'}</strong></p>`;
-  modal.showModal();
+function teamDetailView(state) {
+  const team = getTeamById(state, state.selectedTeamId || state.userTeamId);
+  if (!team) return '<section class="card"><p>Equipo no encontrado.</p></section>';
+
+  const sorted = [...team.squad].sort((a, b) => b.overall - a.overall);
+  return `<div class="grid two">
+    <section class="card">
+      <h2>${team.name}</h2>
+      <p>${teamBadge(team)} · División ${team.division}</p>
+      <p><strong>Formación:</strong>
+      <select data-action="formation" data-team="${team.id}">${Object.keys(FORMATIONS).map((f) => `<option value="${f}" ${team.lineup.formation === f ? 'selected' : ''}>${f}</option>`).join('')}</select></p>
+      <button class="btn" data-action="set-user-team" data-team="${team.id}">Controlar este equipo</button>
+      <button class="btn" data-action="auto-team-lineup" data-team="${team.id}">Alineación óptima</button>
+      <p class="small">Titulares: ${team.lineup.starters.map((id) => {
+        const player = team.squad.find((item) => item.id === id);
+        return player ? `${player.name} ${player.surname}` : '';
+      }).filter(Boolean).join(', ')}</p>
+    </section>
+    <section class="card">
+      <h3>Plantilla</h3>
+      <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Pos</th><th>Edad</th><th>Nac.</th><th>Med</th><th>Pot</th><th>E/F/M</th></tr></thead><tbody>
+      ${sorted.map((player) => `<tr><td>${player.name} ${player.surname}</td><td>${positionNames[player.position]}</td><td>${player.age}</td><td>${player.nationality}</td><td>${player.overall}</td><td>${player.potential}</td><td>${player.energy}/${player.form}/${player.morale}</td></tr>`).join('')}
+      </tbody></table></div>
+    </section>
+  </div>`;
+}
+
+function marketView(state, filters) {
+  const userTeam = getTeamById(state, state.userTeamId);
+  const players = getMarketPlayers(state, filters).slice(0, 80);
+  return `<section class="card">
+    <h2>Mercado de fichajes (${isTransferWindowOpen(state) ? state.transferWindow : 'cerrado'})</h2>
+    <p>Presupuesto ${userTeam.name}: <strong>${money(userTeam.budget)}</strong></p>
+    <div class="filters">
+      <select data-filter="position"><option value="">Posición</option><option>POR</option><option>DEF</option><option>MED</option><option>DEL</option></select>
+      <input data-filter="maxAge" type="number" placeholder="Edad máx" />
+      <input data-filter="minOverall" type="number" placeholder="Media mín" />
+      <input data-filter="nationality" placeholder="Nacionalidad" />
+      <label><input data-filter="onlyClauses" type="checkbox" value="1" /> Cláusulas</label>
+      <label><input data-filter="extracom" type="checkbox" value="1" /> Extracom.</label>
+      <button class="btn" data-action="apply-filters">Aplicar filtros</button>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Club</th><th>Pos</th><th>Edad</th><th>Media</th><th>Pot</th><th>Valor</th><th>Cláusula</th><th>Extrac.</th><th>Acciones</th></tr></thead><tbody>
+    ${players.map((player) => `<tr><td>${player.name} ${player.surname}</td><td>${player.teamName}</td><td>${player.position}</td><td>${player.age}</td><td>${player.overall}</td><td>${player.potential}</td><td>${money(player.value)}</td><td>${money(player.clause)}</td><td>${player.nonEu ? 'Sí' : 'No'}</td><td><button class="btn" data-action="buy" data-player="${player.id}" data-team="${player.teamId}">Oferta</button> <button class="btn" data-action="buy-clause" data-player="${player.id}" data-team="${player.teamId}">Pagar cláusula</button></td></tr>`).join('')}
+    </tbody></table></div>
+  </section>`;
+}
+
+function cupEuropeView(state) {
+  const summary = state.lastSeasonSummary;
+  return `<section class="card"><h2>Copa y Europa</h2>
+    <div class="grid two">
+      ${trophyCard(competitions.league.name, competitions.league.icon, competitions.league.accent, summary?.leagueChampion)}
+      ${trophyCard(competitions.cup.name, competitions.cup.icon, competitions.cup.accent, summary?.cupChampion)}
+      ${trophyCard(competitions.champions.name, competitions.champions.icon, competitions.champions.accent, summary?.championsWinner)}
+      ${trophyCard(competitions.cupWinners.name, competitions.cupWinners.icon, competitions.cupWinners.accent, summary?.cupWinnersWinner)}
+      ${trophyCard(competitions.continental2.name, competitions.continental2.icon, competitions.continental2.accent, summary?.continental2Winner)}
+    </div>
+    <p class="small">Clasificación continental: campeón de liga → Copa de Campeones, campeón de copa → Copa de Campeones de Copa, 2º-4º (o siguientes elegibles) → Copa Imperial Europea.</p>
+  </section>`;
+}
+
+function historyView(state) {
+  const rows = [...state.history.seasons].reverse();
+  return `<section class="card"><h2>Historia / Palmarés</h2>
+    <div class="table-wrap"><table><thead><tr><th>Temp.</th><th>Año</th><th>Liga</th><th>Copa</th><th>Copa Campeones</th><th>Copa Camp. Copa</th><th>Copa Imperial</th><th>Pichichi</th><th>Zamora</th><th>Mejor jugador</th></tr></thead><tbody>
+    ${rows.map((item) => `<tr><td>${item.season}</td><td>${item.year}</td><td>${item.leagueChampion}</td><td>${item.cupChampion}</td><td>${item.championsWinner}</td><td>${item.cupWinnersWinner}</td><td>${item.continental2Winner}</td><td>${item.awards.pichichi}</td><td>${item.awards.zamora}</td><td>${item.awards.bestPlayer}</td></tr>`).join('') || '<tr><td colspan="10">Aún no hay temporadas finalizadas.</td></tr>'}
+    </tbody></table></div>
+  </section>`;
+}
+
+function endSeasonView(state) {
+  const summary = state.lastSeasonSummary;
+  if (!summary) return '<section class="card"><h2>Fin de temporada</h2><p class="small">Completa una temporada para ver el resumen.</p></section>';
+  return `<section class="card"><h2>Resumen temporada ${summary.season}</h2>
+    <p><strong>Campeón de Liga:</strong> ${summary.leagueChampion}</p>
+    <p><strong>Campeón de Copa:</strong> ${summary.cupChampion}</p>
+    <p><strong>Ascensos:</strong> ${summary.promoted.join(', ')}</p>
+    <p><strong>Descensos:</strong> ${summary.relegated.join(', ')}</p>
+    <p><strong>Pichichi:</strong> ${summary.awards.pichichi}</p>
+    <p><strong>Portero menos goleado:</strong> ${summary.awards.zamora}</p>
+    <p><strong>Mejor jugador:</strong> ${summary.awards.bestPlayer}</p>
+  </section>`;
+}
+
+export function render(root, app) {
+  const teamsById = Object.fromEntries([...app.state.firstDivision, ...app.state.secondDivision].map((team) => [team.id, team]));
+  const viewMap = {
+    [views.dashboard]: dashboardView(app.state),
+    [views.matchday]: matchdayView(app.state),
+    [views.standings1]: `<section class="card"><h2>Primera División</h2>${standingsTable(app.state.firstStandings, teamsById)}</section>`,
+    [views.standings2]: `<section class="card"><h2>Segunda División</h2>${standingsTable(app.state.secondStandings, teamsById)}</section>`,
+    [views.teams]: teamsView(app.state),
+    [views.teamDetail]: teamDetailView(app.state),
+    [views.market]: marketView(app.state, app.marketFilters),
+    [views.cupEurope]: cupEuropeView(app.state),
+    [views.history]: historyView(app.state),
+    [views.endSeason]: endSeasonView(app.state),
+  };
+
+  root.innerHTML = viewMap[app.view] || viewMap.dashboard;
 }
