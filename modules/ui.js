@@ -377,10 +377,30 @@ function cupEuropeView(state) {
 
 function historyView(state) {
   const rows = [...state.history.globalBySeason].reverse();
+  const finals = [...(state.history.finalStandingsBySeason || [])].sort((a, b) => b.season - a.season);
+  const selectedSeason = state.ui?.historySeason || finals[0]?.season || null;
+  const selectedDivision = state.ui?.historyDivision || 'd1';
+  const selectedData = finals.find((item) => item.season === Number(selectedSeason)) || null;
+  const selectedRows = selectedData?.[selectedDivision] || [];
+
+  const historicalTable = `<article class="card"><h3>Clasificaciones históricas</h3>
+    <div class="filters">
+      <label>Temporada <select data-action="history-season">${finals.map((item) => `<option value="${item.season}" ${Number(selectedSeason) === item.season ? 'selected' : ''}>${item.season} (${item.year})</option>`).join('')}</select></label>
+      <div class="tabs">
+        <button class="btn ${selectedDivision === 'd1' ? 'primary' : ''}" data-action="history-division" data-division="d1">Primera</button>
+        <button class="btn ${selectedDivision === 'd2' ? 'primary' : ''}" data-action="history-division" data-division="d2">Segunda</button>
+      </div>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>Pos</th><th>Equipo</th><th>Pts</th><th>GF</th><th>GC</th><th>DG</th><th>V</th><th>E</th><th>D</th></tr></thead><tbody>
+    ${selectedRows.map((row) => `<tr><td>${row.position}</td><td>${row.teamName}</td><td>${row.points}</td><td>${row.gf}</td><td>${row.ga}</td><td>${row.gd}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td></tr>`).join('') || '<tr><td colspan="9">No hay clasificación congelada para esa temporada.</td></tr>'}
+    </tbody></table></div>
+  </article>`;
+
   return `<section class="card"><h2>Histórico global</h2>
     <div class="table-wrap"><table><thead><tr><th>Temp.</th><th>Liga</th><th>Copa</th><th>Europa clasificados</th><th>Pichichi</th><th>Zamora</th><th>Ascensos</th><th>Descensos</th></tr></thead><tbody>
     ${rows.map((item) => `<tr><td>${item.season}</td><td>${item.leagueChampion}</td><td>${item.cupChampion}</td><td>${[...item.europeQualified.champions, ...item.europeQualified.cupWinners, ...item.europeQualified.continental2].join(', ')}</td><td>${item.pichichi}</td><td>${item.zamora}</td><td>${item.promoted.join(', ')}</td><td>${item.relegated.join(', ')}</td></tr>`).join('') || '<tr><td colspan="8">Aún no hay temporadas finalizadas.</td></tr>'}
     </tbody></table></div>
+    ${finals.length ? historicalTable : '<p class="small">Las clasificaciones finales se guardarán al cerrar cada temporada.</p>'}
   </section>`;
 }
 
@@ -390,6 +410,9 @@ function endSeasonView(state) {
   return `<section class="card"><h2>Resumen temporada ${summary.season}</h2>
     <p><strong>Campeón de Liga:</strong> ${summary.leagueChampion}</p>
     <p><strong>Campeón de Copa:</strong> ${summary.cupChampion}</p>
+    <p><strong>Campeón Copa de Campeones:</strong> ${summary.championsWinner}</p>
+    <p><strong>Campeón Copa de Campeones de Copa:</strong> ${summary.cupWinnersWinner}</p>
+    <p><strong>Campeón Copa Continental:</strong> ${summary.continental2Winner}</p>
     <p><strong>Clasificados a Europa:</strong> ${[...summary.europeQualified.champions, ...summary.europeQualified.cupWinners, ...summary.europeQualified.continental2].join(', ')}</p>
     <p><strong>Ascensos:</strong> ${summary.promoted.join(', ')}</p>
     <p><strong>Descensos:</strong> ${summary.relegated.join(', ')}</p>

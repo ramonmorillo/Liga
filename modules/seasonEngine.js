@@ -33,6 +33,12 @@ const PRIZE_AMOUNTS = {
   internationalSecondary: 200000000,
   promotion: 25000000,
 };
+const TOURNAMENT_ALIASES = {
+  cup: ['cup', 'domesticCup', 'nationalCup'],
+  champions: ['champions', 'championsCup', 'europeChampions'],
+  cupWinners: ['cupWinners', 'cup_winners', 'europeCupWinners'],
+  continental2: ['continental2', 'continental', 'europe'],
+};
 
 function addNews(state, type, text, importance = 'media') {
   state.recentNews.unshift({
@@ -146,6 +152,22 @@ function createTournamentTemplate(key, title, roundFormat, participants) {
   };
 }
 
+function getTournament(state, key) {
+  const aliases = TOURNAMENT_ALIASES[key] || [key];
+  for (const alias of aliases) {
+    if (state.tournaments?.[alias]) return state.tournaments[alias];
+  }
+  return null;
+}
+
+function setTournament(state, key, tournament) {
+  state.tournaments[key] = tournament;
+  const aliases = TOURNAMENT_ALIASES[key] || [];
+  aliases.forEach((alias) => {
+    if (alias !== key && state.tournaments?.[alias]) delete state.tournaments[alias];
+  });
+}
+
 function shuffled(list) {
   return [...list].sort(() => Math.random() - 0.5);
 }
@@ -241,13 +263,14 @@ function updateRoundDatesFromCalendar(state, tournament) {
 
 function setupSeasonTournaments(state) {
   const cupParticipants = normalizeCupParticipants(state.firstDivision.map((team) => ({ id: team.id, name: team.name })), 16);
-  state.tournaments.cup = createTournamentTemplate('cup', 'Copa Nacional', cupRoundFormat, cupParticipants);
-  updateRoundDatesFromCalendar(state, state.tournaments.cup);
+  const domesticCup = createTournamentTemplate('cup', 'Copa Nacional', cupRoundFormat, cupParticipants);
+  setTournament(state, 'cup', domesticCup);
+  updateRoundDatesFromCalendar(state, domesticCup);
 
   if (state.season === 1) {
-    state.tournaments.champions = null;
-    state.tournaments.cupWinners = null;
-    state.tournaments.continental2 = null;
+    setTournament(state, 'champions', null);
+    setTournament(state, 'cupWinners', null);
+    setTournament(state, 'continental2', null);
     return;
   }
 
@@ -261,12 +284,15 @@ function setupSeasonTournaments(state) {
   const cupWinnersParticipants = [...domestic.cupWinners, ...extCup].slice(0, 8);
   const contParticipants = [...domestic.continental2, ...extCont].slice(0, 16);
 
-  state.tournaments.champions = createTournamentTemplate('champions', 'Copa de Campeones', euroRoundFormat, championsParticipants);
-  state.tournaments.cupWinners = createTournamentTemplate('cupWinners', 'Copa de Campeones de Copa', euroRoundFormat, cupWinnersParticipants);
-  state.tournaments.continental2 = createTournamentTemplate('continental2', 'Copa Continental Secundaria', continentalRoundFormat, contParticipants);
-  updateRoundDatesFromCalendar(state, state.tournaments.champions);
-  updateRoundDatesFromCalendar(state, state.tournaments.cupWinners);
-  updateRoundDatesFromCalendar(state, state.tournaments.continental2);
+  const championsCup = createTournamentTemplate('champions', 'Copa de Campeones', euroRoundFormat, championsParticipants);
+  const cupWinnersCup = createTournamentTemplate('cupWinners', 'Copa de Campeones de Copa', euroRoundFormat, cupWinnersParticipants);
+  const continentalCup = createTournamentTemplate('continental2', 'Copa Continental Secundaria', continentalRoundFormat, contParticipants);
+  setTournament(state, 'champions', championsCup);
+  setTournament(state, 'cupWinners', cupWinnersCup);
+  setTournament(state, 'continental2', continentalCup);
+  updateRoundDatesFromCalendar(state, championsCup);
+  updateRoundDatesFromCalendar(state, cupWinnersCup);
+  updateRoundDatesFromCalendar(state, continentalCup);
 }
 
 function applyResult(standings, homeTeam, awayTeam, result) {
@@ -669,6 +695,11 @@ function playTournamentEvent(state, tournament, dateEvent) {
   if (round.winners.length === 1) {
     tournament.championTeamId = round.winners[0].id;
     tournament.championName = round.winners[0].name;
+    if (tournament.key === 'cup') {
+      state.cup = state.cup || {};
+      state.cup.championTeamId = tournament.championTeamId;
+      state.cup.championName = tournament.championName;
+    }
     addNews(state, 'title', `${round.winners[0].name} conquista ${tournament.title}.`, 'alta');
   }
 }
@@ -732,10 +763,10 @@ function computeEuropeSlots(state, cupChampionId) {
 function assignSeasonPrizeMoney(state, summary, promotedTeams = []) {
   const prizeEvents = [];
   const leagueChampion = getTeamById(state, state.firstStandings[0]?.teamId);
-  const cupChampion = getTeamById(state, state.tournaments.cup?.championTeamId);
-  const championsWinner = getTeamById(state, state.tournaments.champions?.championTeamId);
-  const cupWinnersWinner = getTeamById(state, state.tournaments.cupWinners?.championTeamId);
-  const continentalWinner = getTeamById(state, state.tournaments.continental2?.championTeamId);
+  const cupChampion = getTeamById(state, getTournament(state, 'cup')?.championTeamId);
+  const championsWinner = getTeamById(state, getTournament(state, 'champions')?.championTeamId);
+  const cupWinnersWinner = getTeamById(state, getTournament(state, 'cupWinners')?.championTeamId);
+  const continentalWinner = getTeamById(state, getTournament(state, 'continental2')?.championTeamId);
 
   const pushIf = (event) => { if (event) prizeEvents.push(event); };
   pushIf(grantPrizeOnce(state, leagueChampion, PRIZE_AMOUNTS.league, 'league-title', 'ganar la Liga', { competition: 'league' }));
@@ -764,6 +795,84 @@ function registerInternationalPalmares(state, competitionKey, competitionName, c
   state.history.internationalPalmares[competitionKey] = list;
 }
 
+function freezeDivisionStandings(state, divisionKey, standings) {
+  return standings.map((row) => {
+    const team = getTeamById(state, row.teamId);
+    return {
+      position: row.position,
+      teamId: row.teamId,
+      teamName: team?.name || row.teamId,
+      points: row.points,
+      gf: row.gf,
+      ga: row.ga,
+      gd: row.gd,
+      wins: row.wins,
+      draws: row.draws,
+      losses: row.losses,
+      division: divisionKey,
+    };
+  });
+}
+
+function storeSeasonFinalStandings(state) {
+  state.history.finalStandingsBySeason = state.history.finalStandingsBySeason || [];
+  const payload = {
+    season: state.season,
+    year: state.year,
+    d1: freezeDivisionStandings(state, 'd1', state.firstStandings),
+    d2: freezeDivisionStandings(state, 'd2', state.secondStandings),
+  };
+  const index = state.history.finalStandingsBySeason.findIndex((item) => item.season === state.season);
+  if (index >= 0) state.history.finalStandingsBySeason[index] = payload;
+  else state.history.finalStandingsBySeason.push(payload);
+}
+
+function requiredTournaments(state) {
+  const list = [{ key: 'cup', exists: true }];
+  if (state.season > 1) list.push({ key: 'champions', exists: true }, { key: 'cupWinners', exists: true }, { key: 'continental2', exists: true });
+  return list;
+}
+
+function isTournamentResolved(tournament) {
+  if (!tournament) return false;
+  if (tournament.championTeamId && tournament.championName) return true;
+  const finalRound = tournament.rounds?.find((round) => round.round === 'Final');
+  return Boolean(finalRound?.done && finalRound?.winners?.length === 1);
+}
+
+function resolvePendingTournamentEvents(state) {
+  const mandatory = requiredTournaments(state).map((item) => item.key);
+  mandatory.forEach((key) => {
+    const tournament = getTournament(state, key);
+    if (!tournament || isTournamentResolved(tournament)) return;
+    const unresolvedRounds = (tournament.rounds || []).filter((round) => !round.done).map((round) => round.round);
+    (state.seasonCalendar || []).forEach((event) => {
+      if (event.competitionId === key && unresolvedRounds.includes(event.round)) event.status = 'pending';
+    });
+  });
+
+  const pendingEvents = (state.seasonCalendar || [])
+    .filter((event) => event.status !== 'completed' && (event.type === 'cup' || event.type === 'international'))
+    .sort((a, b) => a.dateIndex - b.dateIndex || priorityByType(a.type) - priorityByType(b.type));
+
+  pendingEvents.forEach((event) => {
+    const reports = [];
+    simulateDateByEvent(state, event, reports);
+  });
+}
+
+function ensureCompetitionsResolvedBeforeClosure(state) {
+  resolvePendingTournamentEvents(state);
+  const unresolved = requiredTournaments(state)
+    .map(({ key }) => ({ key, tournament: getTournament(state, key) }))
+    .filter(({ tournament }) => !isTournamentResolved(tournament))
+    .map(({ key, tournament }) => ({
+      key,
+      title: tournament?.title || key,
+    }));
+  return { ok: unresolved.length === 0, unresolved };
+}
+
 function finalizeSeason(state) {
   sortStandings(state.firstStandings);
   sortStandings(state.secondStandings);
@@ -773,10 +882,10 @@ function finalizeSeason(state) {
   const relegated = state.firstStandings.slice(-2).map((row) => getTeamById(state, row.teamId));
   const secondChampion = getTeamById(state, state.secondStandings[0]?.teamId);
 
-  const cup = state.tournaments.cup;
-  const champions = state.tournaments.champions;
-  const cupWinners = state.tournaments.cupWinners;
-  const continental2 = state.tournaments.continental2;
+  const cup = getTournament(state, 'cup');
+  const champions = getTournament(state, 'champions');
+  const cupWinners = getTournament(state, 'cupWinners');
+  const continental2 = getTournament(state, 'continental2');
 
   computeEuropeSlots(state, cup?.championTeamId);
 
@@ -788,9 +897,9 @@ function finalizeSeason(state) {
     leagueChampion: firstChampion.name,
     secondDivisionChampion: secondChampion?.name || 'Pendiente',
     cupChampion: cup?.championName || 'Pendiente',
-    championsWinner: champions?.championName || 'No disputada',
-    cupWinnersWinner: cupWinners?.championName || 'No disputada',
-    continental2Winner: continental2?.championName || 'No disputada',
+    championsWinner: state.season > 1 ? (champions?.championName || 'Pendiente') : 'No disputada',
+    cupWinnersWinner: state.season > 1 ? (cupWinners?.championName || 'Pendiente') : 'No disputada',
+    continental2Winner: state.season > 1 ? (continental2?.championName || 'Pendiente') : 'No disputada',
     relegated: relegated.map((team) => team.name),
     promoted: promoted.map((team) => team.name),
     europeQualified: {
@@ -802,6 +911,7 @@ function finalizeSeason(state) {
   };
 
   assignSeasonPrizeMoney(state, summary, promoted);
+  storeSeasonFinalStandings(state);
 
   const championsFinal = champions?.rounds?.find((r) => r.round === 'Final')?.matches?.[0];
   const cupWinnersFinal = cupWinners?.rounds?.find((r) => r.round === 'Final')?.matches?.[0];
@@ -879,8 +989,14 @@ function finalizeSeason(state) {
 function ensureSeasonSetup(state) {
   const needsCalendarMigration = !state.seasonCalendar?.length || !state.seasonCalendar[0]?.type || state.calendarVersion !== 3;
   if (needsCalendarMigration) buildSeasonCalendar(state);
-  if (!state.tournaments?.cup || !state.tournaments.cup.rounds?.length || !Array.isArray(state.tournaments.cup.rounds[0]?.dates)) setupSeasonTournaments(state);
+  if (!getTournament(state, 'cup') || !getTournament(state, 'cup')?.rounds?.length || !Array.isArray(getTournament(state, 'cup')?.rounds?.[0]?.dates)) setupSeasonTournaments(state);
   repairInternationalCalendarState(state);
+  if (state.cup?.championTeamId && !getTournament(state, 'cup')?.championTeamId) {
+    const cup = getTournament(state, 'cup');
+    cup.championTeamId = state.cup.championTeamId;
+    const champion = getTeamById(state, state.cup.championTeamId);
+    cup.championName = champion?.name || state.cup.championName || null;
+  }
 }
 
 function repairInternationalCalendarState(state) {
@@ -907,13 +1023,13 @@ function simulateDateByEvent(state, event, allReports) {
   }
 
   if (event.type === 'cup') {
-    playTournamentEvent(state, state.tournaments.cup, event);
+    playTournamentEvent(state, getTournament(state, 'cup'), event);
     event.status = 'completed';
     return;
   }
 
   if (event.type === 'international') {
-    playTournamentEvent(state, state.tournaments[event.competitionId], event);
+    playTournamentEvent(state, getTournament(state, event.competitionId), event);
     event.status = 'completed';
     return;
   }
@@ -948,6 +1064,11 @@ export function simulateMatchday(state) {
   state.currentMatchday += 1;
 
   if (state.currentMatchday > state.maxMatchday) {
+    const seasonCheck = ensureCompetitionsResolvedBeforeClosure(state);
+    if (!seasonCheck.ok) {
+      const names = seasonCheck.unresolved.map((item) => item.title).join(', ');
+      return { done: false, message: `Cierre bloqueado: competiciones pendientes (${names})`, summary: matchdaySummary };
+    }
     finalizeSeason(state);
     return { done: true, message: 'Fin de temporada completado', summary: matchdaySummary };
   }

@@ -198,7 +198,7 @@ export function createNewGame() {
     selectedTeamId: firstDivision[0].id,
     selectedMatchId: null,
     selectedCalendarWeek: 1,
-    ui: { teamDetailTab: 'squad', selectedPlayerId: null },
+    ui: { teamDetailTab: 'squad', selectedPlayerId: null, historyDivision: 'd1', historySeason: null },
     matchArchive: {},
     seasonCalendar: [],
     history: {
@@ -216,6 +216,7 @@ export function createNewGame() {
       globalBySeason: [],
       financialEvents: [],
       internationalPalmares: {},
+      finalStandingsBySeason: [],
     },
     prizeLedger: {},
     europeSlots: { champions: [], cupWinners: [], continental2: [] },
@@ -257,8 +258,9 @@ function enrichLegacyState(raw) {
   raw.selectedTeamId = raw.selectedTeamId || raw.userTeamId;
   raw.selectedMatchId = raw.selectedMatchId || null;
   raw.selectedCalendarWeek = raw.selectedCalendarWeek || 1;
-  raw.ui = raw.ui || { teamDetailTab: 'squad', selectedPlayerId: null };
+  raw.ui = raw.ui || { teamDetailTab: 'squad', selectedPlayerId: null, historyDivision: 'd1', historySeason: null };
   if (!raw.ui.teamDetailTab) raw.ui.teamDetailTab = 'squad';
+  if (!raw.ui.historyDivision) raw.ui.historyDivision = 'd1';
   raw.matchArchive = raw.matchArchive || {};
   raw.seasonCalendar = raw.seasonCalendar || [];
   raw.history = raw.history || {};
@@ -270,6 +272,7 @@ function enrichLegacyState(raw) {
   raw.history.globalBySeason = raw.history.globalBySeason || [];
   raw.history.financialEvents = raw.history.financialEvents || [];
   raw.history.internationalPalmares = raw.history.internationalPalmares || {};
+  raw.history.finalStandingsBySeason = raw.history.finalStandingsBySeason || [];
   raw.prizeLedger = raw.prizeLedger || {};
   raw.tournaments = raw.tournaments || {};
   raw.europeExternal = raw.europeExternal || { leagues: [], history: [] };
