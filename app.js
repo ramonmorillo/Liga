@@ -2,7 +2,7 @@ import { render, renderNav, views } from './modules/ui.js';
 import { clearGame, ensureGame, exportGame, importGame, saveGame } from './modules/storage.js';
 import { autoPickLineup } from './modules/lineups.js';
 import { allTeams, createNewGame, getTeamById } from './modules/state.js';
-import { initializeSeasonStructures, simulateMatchday } from './modules/seasonEngine.js';
+import { dismissCoach, initializeSeasonStructures, simulateMatchday } from './modules/seasonEngine.js';
 import { transferPlayer } from './modules/transfers.js';
 
 const app = {
@@ -83,6 +83,14 @@ function bindViewActions() {
   root.querySelector('[data-action="auto-team-lineup"]')?.addEventListener('click', (event) => {
     const team = getTeamById(app.state, event.currentTarget.dataset.team);
     team.lineup = autoPickLineup(team, team.tactics.formation);
+    repaint();
+  });
+
+  root.querySelector('[data-action="dismiss-coach"]')?.addEventListener('click', (event) => {
+    const teamId = event.currentTarget.dataset.team;
+    if (!confirm('¿Confirmas el cese del entrenador?')) return;
+    const result = dismissCoach(app.state, teamId);
+    alert(result.message);
     repaint();
   });
 
