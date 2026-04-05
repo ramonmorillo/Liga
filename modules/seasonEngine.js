@@ -151,6 +151,8 @@ function createTournamentTemplate(key, title, roundFormat, participants) {
   return {
     key,
     title,
+    season: null,
+    editionId: null,
     participants,
     championTeamId: null,
     championName: null,
@@ -354,17 +356,23 @@ function ensureTournamentInventory(state) {
     const required = state.season >= spec.requiredFromSeason;
     if (!required) {
       setTournament(state, spec.key, null);
+      state.seasonCalendar = (state.seasonCalendar || []).filter((event) => event.competitionId !== spec.key);
       return;
     }
 
     let tournament = getTournament(state, spec.key);
-    if (!hasValidTournamentShape(tournament, spec)) {
+    const mustRegenerateSeasonEdition = !tournament || tournament.season !== state.season;
+    if (mustRegenerateSeasonEdition || !hasValidTournamentShape(tournament, spec)) {
       const participants = deriveTournamentParticipants(state, spec.key);
       tournament = createTournamentTemplate(spec.key, spec.title, spec.roundFormat, participants);
+      tournament.season = state.season;
+      tournament.editionId = `${spec.key}:S${state.season}`;
       setTournament(state, spec.key, tournament);
     } else {
       tournament.title = spec.title;
       tournament.key = spec.key;
+      tournament.season = state.season;
+      tournament.editionId = tournament.editionId || `${spec.key}:S${state.season}`;
       tournament.participants = Array.isArray(tournament.participants) ? tournament.participants.filter(Boolean) : [];
       if (!tournament.participants.length) tournament.participants = deriveTournamentParticipants(state, spec.key);
     }
@@ -378,12 +386,39 @@ function setupSeasonTournaments(state) {
   ensureTournamentInventory(state);
 }
 
+function dedupeAndFreezeInternationalPalmares(state) {
+  state.history = state.history || {};
+  state.history.internationalPalmares = state.history.internationalPalmares || {};
+  Object.keys(state.history.internationalPalmares).forEach((competitionKey) => {
+    const source = Array.isArray(state.history.internationalPalmares[competitionKey]) ? state.history.internationalPalmares[competitionKey] : [];
+    const bySeason = new Map();
+    source.forEach((entry) => {
+      if (!entry || typeof entry.season !== 'number') return;
+      const normalized = {
+        season: entry.season,
+        year: entry.year ?? null,
+        competition: entry.competition || competitionKey,
+        champion: entry.champion || null,
+        runnerUp: entry.runnerUp || null,
+        finalScore: entry.finalScore || null,
+      };
+      const existing = bySeason.get(entry.season);
+      if (!existing || (!existing.finalScore && normalized.finalScore) || (!existing.runnerUp && normalized.runnerUp)) {
+        bySeason.set(entry.season, normalized);
+      }
+    });
+    const rebuilt = [...bySeason.values()].sort((a, b) => a.season - b.season);
+    state.history.internationalPalmares[competitionKey] = typeof structuredClone === 'function' ? structuredClone(rebuilt) : JSON.parse(JSON.stringify(rebuilt));
+  });
+}
+
 function rebuildSeasonCompetitionState(state, { forceCalendar = false } = {}) {
   const needsCalendar = forceCalendar || !Array.isArray(state.seasonCalendar) || !state.seasonCalendar.length || !state.seasonCalendar[0]?.type || state.calendarVersion !== 3;
   if (needsCalendar) buildSeasonCalendar(state);
   setupSeasonTournaments(state);
   repairInternationalCalendarState(state);
   ensureTournamentInventory(state);
+  dedupeAndFreezeInternationalPalmares(state);
 }
 
 function applyResult(standings, homeTeam, awayTeam, result) {
@@ -938,18 +973,46 @@ function assignSeasonPrizeMoney(state, summary, promotedTeams = []) {
   return prizeEvents;
 }
 
-function registerInternationalPalmares(state, competitionKey, competitionName, championName, runnerUpName = null) {
-  if (!championName) return;
+function registerInternationalPalmares(state, competitionKey, competitionName, championName, runnerUpName = null, finalScore = null) {
+  if (!championName) throw new Error(`No se puede registrar palmarés de ${competitionName} sin campeón en temporada ${state.season}.`);
   state.history.internationalPalmares = state.history.internationalPalmares || {};
-  const list = state.history.internationalPalmares[competitionKey] || [];
-  list.push({
+  const list = Array.isArray(state.history.internationalPalmares[competitionKey]) ? [...state.history.internationalPalmares[competitionKey]] : [];
+  const duplicateSeason = list.find((entry) => entry.season === state.season);
+  if (duplicateSeason) {
+    throw new Error(`Palmarés duplicado detectado para ${competitionName} en temporada ${state.season}.`);
+  }
+  const snapshot = {
     season: state.season,
     year: state.year,
     competition: competitionName,
     champion: championName,
     runnerUp: runnerUpName || null,
-  });
+    finalScore: finalScore || null,
+  };
+  list.push(typeof structuredClone === 'function' ? structuredClone(snapshot) : JSON.parse(JSON.stringify(snapshot)));
   state.history.internationalPalmares[competitionKey] = list;
+}
+
+function runnerUpAndScoreFromFinal(finalMatch, championTeamId) {
+  if (!finalMatch || !championTeamId) return { runnerUpName: null, finalScore: null };
+  const runnerUpName = finalMatch.winnerId === finalMatch.homeTeamId ? finalMatch.awayName : finalMatch.homeName;
+  const baseScore = finalMatch.leg1?.score || null;
+  return { runnerUpName, finalScore: baseScore };
+}
+
+function validateInternationalEditionForHistory(state, key) {
+  const tournament = getTournament(state, key);
+  const spec = getTournamentSpec(key);
+  if (!spec || state.season < spec.requiredFromSeason) return { shouldRegister: false };
+  if (!tournament?.championTeamId || !tournament?.championName) {
+    throw new Error(`Competición ${spec.title} sin campeón resuelto en temporada ${state.season}.`);
+  }
+  const finalRound = tournament.rounds?.find((round) => round.round === 'Final');
+  const finalMatch = finalRound?.matches?.[0] || null;
+  if (!finalRound?.done || !finalMatch?.winnerId) {
+    throw new Error(`Final no resuelta en ${spec.title} (temporada ${state.season}).`);
+  }
+  return { shouldRegister: true, tournament, finalMatch, spec };
 }
 
 function freezeDivisionStandings(state, divisionKey, standings) {
@@ -1072,12 +1135,19 @@ function finalizeSeason(state) {
   assignSeasonPrizeMoney(state, summary, promoted);
   storeSeasonFinalStandings(state);
 
-  const championsFinal = champions?.rounds?.find((r) => r.round === 'Final')?.matches?.[0];
-  const cupWinnersFinal = cupWinners?.rounds?.find((r) => r.round === 'Final')?.matches?.[0];
-  const continentalFinal = continental2?.rounds?.find((r) => r.round === 'Final')?.matches?.[0];
-  registerInternationalPalmares(state, 'champions', 'Copa de Campeones', champions?.championName, championsFinal ? (championsFinal.winnerId === championsFinal.homeTeamId ? championsFinal.awayName : championsFinal.homeName) : null);
-  registerInternationalPalmares(state, 'cupWinners', 'Copa de Campeones de Copa', cupWinners?.championName, cupWinnersFinal ? (cupWinnersFinal.winnerId === cupWinnersFinal.homeTeamId ? cupWinnersFinal.awayName : cupWinnersFinal.homeName) : null);
-  registerInternationalPalmares(state, 'continental2', 'Copa Continental Secundaria', continental2?.championName, continentalFinal ? (continentalFinal.winnerId === continentalFinal.homeTeamId ? continentalFinal.awayName : continentalFinal.homeName) : null);
+  ['champions', 'cupWinners', 'continental2'].forEach((competitionKey) => {
+    const validation = validateInternationalEditionForHistory(state, competitionKey);
+    if (!validation.shouldRegister) return;
+    const { runnerUpName, finalScore } = runnerUpAndScoreFromFinal(validation.finalMatch, validation.tournament.championTeamId);
+    registerInternationalPalmares(
+      state,
+      competitionKey,
+      validation.spec.title,
+      validation.tournament.championName,
+      runnerUpName,
+      finalScore,
+    );
+  });
 
   registerTeamTitle(state, firstChampion.id, 'league', state.season);
   if (state.secondStandings[0]?.teamId) registerTeamTitle(state, state.secondStandings[0].teamId, 'league2', state.season);
