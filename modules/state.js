@@ -191,7 +191,7 @@ export function createNewGame() {
 
   const state = {
     version: CURRENT_STATE_VERSION,
-    calendarVersion: 2,
+    calendarVersion: 3,
     season: 1,
     year: START_YEAR,
     currentMatchday: 1,
@@ -360,13 +360,11 @@ function enrichLegacyState(raw) {
 
 export function migrateState(raw) {
   if (!raw || typeof raw !== 'object') return null;
-  if (raw.version === CURRENT_STATE_VERSION) {
-    normalizeExternalLeagueData(raw.europeExternal);
-    return raw;
-  }
 
   if (raw.firstDivision && raw.secondDivision) {
-    return enrichLegacyState(raw);
+    const enriched = enrichLegacyState(raw);
+    normalizeExternalLeagueData(enriched.europeExternal);
+    return enriched;
   }
 
   return null;
