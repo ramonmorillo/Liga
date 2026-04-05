@@ -48,6 +48,12 @@ const TOURNAMENT_ALIASES = {
   cupWinners: ['cupWinners', 'cup_winners', 'europeCupWinners'],
   continental2: ['continental2', 'continental', 'europe'],
 };
+const TOURNAMENT_SPECS = {
+  cup: { key: 'cup', title: 'Copa Nacional', type: 'cup', roundFormat: cupRoundFormat, requiredFromSeason: 1, slots: 16 },
+  champions: { key: 'champions', title: 'Copa de Campeones', type: 'international', roundFormat: euroRoundFormat, requiredFromSeason: 2, slots: 8 },
+  cupWinners: { key: 'cupWinners', title: 'Copa de Campeones de Copa', type: 'international', roundFormat: euroRoundFormat, requiredFromSeason: 2, slots: 8 },
+  continental2: { key: 'continental2', title: 'Copa Continental Secundaria', type: 'international', roundFormat: continentalRoundFormat, requiredFromSeason: 2, slots: 16 },
+};
 
 function addNews(state, type, text, importance = 'media') {
   state.recentNews.unshift({
@@ -161,6 +167,10 @@ function createTournamentTemplate(key, title, roundFormat, participants) {
   };
 }
 
+function getTournamentSpec(key) {
+  return TOURNAMENT_SPECS[key] || null;
+}
+
 function getTournament(state, key) {
   const aliases = TOURNAMENT_ALIASES[key] || [key];
   for (const alias of aliases) {
@@ -270,38 +280,102 @@ function updateRoundDatesFromCalendar(state, tournament) {
   });
 }
 
-function setupSeasonTournaments(state) {
-  const cupParticipants = normalizeCupParticipants(state.firstDivision.map((team) => ({ id: team.id, name: team.name })), 16);
-  const domesticCup = createTournamentTemplate('cup', 'Copa Nacional', cupRoundFormat, cupParticipants);
-  setTournament(state, 'cup', domesticCup);
-  updateRoundDatesFromCalendar(state, domesticCup);
-
-  if (state.season === 1) {
-    setTournament(state, 'champions', null);
-    setTournament(state, 'cupWinners', null);
-    setTournament(state, 'continental2', null);
-    return;
+function deriveTournamentParticipants(state, key) {
+  if (key === 'cup') {
+    return normalizeCupParticipants(state.firstDivision.map((team) => ({ id: team.id, name: team.name })), 16);
   }
 
   const ext = state.europeExternal?.leagues || [];
   const extChampions = ext.map((league) => ({ id: `ext:${league.championTeamId}`, name: league.champion }));
   const extCup = ext.map((league) => ({ id: `ext:${league.cupChampionTeamId}`, name: league.cupChampion }));
   const extCont = ext.flatMap((league) => league.table.slice(1, 3).map((row) => ({ id: `ext:${row.teamId}`, name: row.teamName })));
-
   const domestic = state.europeSlots || { champions: [], cupWinners: [], continental2: [] };
-  const championsParticipants = [...domestic.champions, ...extChampions].slice(0, 8);
-  const cupWinnersParticipants = [...domestic.cupWinners, ...extCup].slice(0, 8);
-  const contParticipants = [...domestic.continental2, ...extCont].slice(0, 16);
 
-  const championsCup = createTournamentTemplate('champions', 'Copa de Campeones', euroRoundFormat, championsParticipants);
-  const cupWinnersCup = createTournamentTemplate('cupWinners', 'Copa de Campeones de Copa', euroRoundFormat, cupWinnersParticipants);
-  const continentalCup = createTournamentTemplate('continental2', 'Copa Continental Secundaria', continentalRoundFormat, contParticipants);
-  setTournament(state, 'champions', championsCup);
-  setTournament(state, 'cupWinners', cupWinnersCup);
-  setTournament(state, 'continental2', continentalCup);
-  updateRoundDatesFromCalendar(state, championsCup);
-  updateRoundDatesFromCalendar(state, cupWinnersCup);
-  updateRoundDatesFromCalendar(state, continentalCup);
+  if (key === 'champions') return [...domestic.champions, ...extChampions].slice(0, 8);
+  if (key === 'cupWinners') return [...domestic.cupWinners, ...extCup].slice(0, 8);
+  if (key === 'continental2') return [...domestic.continental2, ...extCont].slice(0, 16);
+  return [];
+}
+
+function ensureTournamentCalendarEvents(state, key) {
+  const spec = getTournamentSpec(key);
+  if (!spec) return;
+  state.seasonCalendar = Array.isArray(state.seasonCalendar) ? state.seasonCalendar : [];
+  const nextDate = () => (state.seasonCalendar.length ? Math.max(...state.seasonCalendar.map((event) => event.dateIndex || 0)) + 1 : 1);
+
+  spec.roundFormat.forEach((roundConfig) => {
+    roundConfig.anchors.forEach((_, index) => {
+      const leg = roundConfig.twoLegged ? index + 1 : 1;
+      const existing = state.seasonCalendar.find((event) => event.competitionId === key && event.round === roundConfig.round && (event.leg || 1) === leg);
+      if (existing) {
+        existing.type = spec.type;
+        existing.status = existing.status || 'pending';
+        existing.matches = Array.isArray(existing.matches) ? existing.matches : [];
+        existing.label = spec.title;
+        return;
+      }
+      const dateIndex = nextDate();
+      state.seasonCalendar.push({
+        id: `S${state.season}-${key}-${roundConfig.round}-${leg}`,
+        season: state.season,
+        type: spec.type,
+        competitionId: key,
+        round: roundConfig.round,
+        leg,
+        status: 'pending',
+        matches: [],
+        label: spec.title,
+        dateIndex,
+        week: dateIndex,
+      });
+    });
+  });
+
+  state.seasonCalendar.sort((a, b) => (a.dateIndex || 0) - (b.dateIndex || 0) || priorityByType(a.type) - priorityByType(b.type));
+  state.seasonCalendar.forEach((event, index) => {
+    event.dateIndex = index + 1;
+    event.week = index + 1;
+  });
+  state.maxMatchday = state.seasonCalendar.length;
+}
+
+function hasValidTournamentShape(tournament, spec) {
+  if (!tournament || !spec) return false;
+  if (!Array.isArray(tournament.rounds) || tournament.rounds.length !== spec.roundFormat.length) return false;
+  const roundsValid = spec.roundFormat.every((roundSpec, index) => {
+    const round = tournament.rounds[index];
+    return round?.round === roundSpec.round && typeof round.twoLegged === 'boolean' && round.twoLegged === roundSpec.twoLegged;
+  });
+  return roundsValid;
+}
+
+function ensureTournamentInventory(state) {
+  Object.values(TOURNAMENT_SPECS).forEach((spec) => {
+    const required = state.season >= spec.requiredFromSeason;
+    if (!required) {
+      setTournament(state, spec.key, null);
+      return;
+    }
+
+    let tournament = getTournament(state, spec.key);
+    if (!hasValidTournamentShape(tournament, spec)) {
+      const participants = deriveTournamentParticipants(state, spec.key);
+      tournament = createTournamentTemplate(spec.key, spec.title, spec.roundFormat, participants);
+      setTournament(state, spec.key, tournament);
+    } else {
+      tournament.title = spec.title;
+      tournament.key = spec.key;
+      tournament.participants = Array.isArray(tournament.participants) ? tournament.participants.filter(Boolean) : [];
+      if (!tournament.participants.length) tournament.participants = deriveTournamentParticipants(state, spec.key);
+    }
+
+    ensureTournamentCalendarEvents(state, spec.key);
+    updateRoundDatesFromCalendar(state, tournament);
+  });
+}
+
+function setupSeasonTournaments(state) {
+  ensureTournamentInventory(state);
 }
 
 function applyResult(standings, homeTeam, awayTeam, result) {
@@ -904,9 +978,9 @@ function storeSeasonFinalStandings(state) {
 }
 
 function requiredTournaments(state) {
-  const list = [{ key: 'cup', exists: true }];
-  if (state.season > 1) list.push({ key: 'champions', exists: true }, { key: 'cupWinners', exists: true }, { key: 'continental2', exists: true });
-  return list;
+  return Object.values(TOURNAMENT_SPECS)
+    .filter((spec) => state.season >= spec.requiredFromSeason)
+    .map((spec) => ({ key: spec.key, exists: true }));
 }
 
 function isTournamentResolved(tournament) {
@@ -917,6 +991,7 @@ function isTournamentResolved(tournament) {
 }
 
 function resolvePendingTournamentEvents(state) {
+  ensureTournamentInventory(state);
   const mandatory = requiredTournaments(state).map((item) => item.key);
   mandatory.forEach((key) => {
     const tournament = getTournament(state, key);
@@ -1085,6 +1160,7 @@ function ensureSeasonSetup(state) {
   if (needsCalendarMigration) buildSeasonCalendar(state);
   if (!getTournament(state, 'cup') || !getTournament(state, 'cup')?.rounds?.length || !Array.isArray(getTournament(state, 'cup')?.rounds?.[0]?.dates)) setupSeasonTournaments(state);
   repairInternationalCalendarState(state);
+  ensureTournamentInventory(state);
   if (state.cup?.championTeamId && !getTournament(state, 'cup')?.championTeamId) {
     const cup = getTournament(state, 'cup');
     cup.championTeamId = state.cup.championTeamId;
