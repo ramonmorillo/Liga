@@ -4,8 +4,9 @@ import { namePools, euNationalities, nonEuNationalities } from '../data/names.js
 import { competitions } from '../data/trophies.js';
 import { generateDoubleRoundRobin } from './scheduler.js';
 import { autoPickLineup } from './lineups.js';
+import { normalizeExternalLeagueData } from './europe.js';
 
-export const CURRENT_STATE_VERSION = 5;
+export const CURRENT_STATE_VERSION = 6;
 const START_YEAR = 2026;
 
 const squadShape = [...Array(3).fill('POR'), ...Array(8).fill('DEF'), ...Array(8).fill('MED'), ...Array(5).fill('DEL')];
@@ -21,9 +22,14 @@ function splitClubName(name) {
   return name.replace(/^(Real|Club Deportivo|Atlético|Sporting|Deportivo|Unión|CF|FC|CD|Inter|Racing)\s+/i, '').trim();
 }
 
-function createCoach() {
+function coachId() {
+  return `coach-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+export function createCoachProfile() {
   const pools = namePools.España;
   return {
+    id: coachId(),
     name: `${pick(pools.first)} ${pick(pools.last)}`,
     age: rand(38, 67),
     style: pick(coachStyles),
@@ -33,6 +39,10 @@ function createCoach() {
     pressure: 0,
     changes: [],
   };
+}
+
+function createContractEndYear(currentYear = START_YEAR) {
+  return currentYear + rand(1, 5);
 }
 
 function createIdentity(raw, division) {
@@ -59,7 +69,7 @@ function createIdentity(raw, division) {
   };
 }
 
-function createPlayer(teamId, idx, position, base, nonEuRemaining, age = rand(17, 35)) {
+function createPlayer(teamId, idx, position, base, nonEuRemaining, age = rand(17, 35), currentYear = START_YEAR) {
   const isNonEu = nonEuRemaining > 0 && Math.random() < 0.14;
   const nationality = isNonEu ? pick(nonEuNationalities) : pick(euNationalities);
   const pools = namePools[nationality] || namePools.España;
@@ -85,6 +95,7 @@ function createPlayer(teamId, idx, position, base, nonEuRemaining, age = rand(17
     nonEu: isNonEu,
     seasonGoals: 0,
     seasonConceded: 0,
+    contractEndYear: createContractEndYear(currentYear),
     history: { seasons: 0, clubs: [], goals: 0, titles: [] },
   };
 }
@@ -102,12 +113,13 @@ function setupTeam(raw, idx, division) {
     strength: raw.strength,
     budget: raw.budget * 1000000,
     finances: { transferIn: 0, transferOut: 0, prizes: 0 },
+    financialHistory: [],
     squad: [],
     tactics: { formation: '4-3-3' },
     lineup: { formation: '4-3-3', starters: [], bench: [] },
     seasonStats: { points: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, gd: 0 },
     trophies: {},
-    coach: createCoach(),
+    coach: createCoachProfile(),
     ...createIdentity(raw, division),
   };
 
@@ -179,7 +191,9 @@ export function createNewGame() {
       transfersBySeason: {},
       coachChanges: [],
       globalBySeason: [],
+      financialEvents: [],
     },
+    prizeLedger: {},
     europeSlots: { champions: [], cupWinners: [], continental2: [] },
     cup: { championTeamId: null, runnerUpTeamId: null, rounds: [] },
     tournaments: {},
@@ -207,6 +221,11 @@ export function getTeamById(state, teamId) {
   return allTeams(state).find((team) => team.id === teamId);
 }
 
+export function contractSeasonsLeft(player, currentYear) {
+  if (!player || typeof player.contractEndYear !== 'number') return 0;
+  return Math.max(0, player.contractEndYear - currentYear);
+}
+
 function enrichLegacyState(raw) {
   raw.transferHistory = raw.transferHistory || [];
   raw.recentNews = raw.recentNews || [];
@@ -223,13 +242,17 @@ function enrichLegacyState(raw) {
   raw.history.clubSeasonStats = raw.history.clubSeasonStats || {};
   raw.history.clubTitleLog = raw.history.clubTitleLog || [];
   raw.history.globalBySeason = raw.history.globalBySeason || [];
+  raw.history.financialEvents = raw.history.financialEvents || [];
+  raw.prizeLedger = raw.prizeLedger || {};
   raw.tournaments = raw.tournaments || {};
   raw.europeExternal = raw.europeExternal || { leagues: [], history: [] };
   raw.calendarVersion = raw.calendarVersion || 1;
+  normalizeExternalLeagueData(raw.europeExternal);
 
   allTeams(raw).forEach((team) => {
     if (!team.finances) team.finances = { transferIn: 0, transferOut: 0, prizes: 0 };
-    if (!team.coach) team.coach = createCoach();
+    if (!team.financialHistory) team.financialHistory = [];
+    if (!team.coach) team.coach = createCoachProfile();
     if (!team.stadium || !team.kits || !team.crest) {
       const identity = createIdentity(team, team.division || 1);
       team.stadium = team.stadium || identity.stadium;
@@ -241,6 +264,13 @@ function enrichLegacyState(raw) {
     if (!team.coach.changes) team.coach.changes = [];
     if (!team.coach.status) team.coach.status = 'estable';
     if (!team.coach.pressure) team.coach.pressure = 0;
+    if (!team.coach.id) team.coach.id = coachId();
+
+    team.squad.forEach((player) => {
+      if (!player.history) player.history = { seasons: 0, clubs: [team.id], goals: 0, titles: [] };
+      if (!Array.isArray(player.history.clubs)) player.history.clubs = [team.id];
+      if (typeof player.contractEndYear !== 'number') player.contractEndYear = createContractEndYear(raw.year || START_YEAR);
+    });
   });
 
   raw.version = CURRENT_STATE_VERSION;
@@ -249,7 +279,10 @@ function enrichLegacyState(raw) {
 
 export function migrateState(raw) {
   if (!raw || typeof raw !== 'object') return null;
-  if (raw.version === CURRENT_STATE_VERSION) return raw;
+  if (raw.version === CURRENT_STATE_VERSION) {
+    normalizeExternalLeagueData(raw.europeExternal);
+    return raw;
+  }
 
   if (raw.firstDivision && raw.secondDivision) {
     return enrichLegacyState(raw);
@@ -288,6 +321,9 @@ export function ageAndEvolveSquads(state) {
       player.clause = Math.round(player.value * rand(3, 10));
       player.history.seasons += 1;
       player.history.goals += player.seasonGoals;
+      if (!player.contractEndYear || player.contractEndYear <= state.year) {
+        player.contractEndYear = state.year + rand(1, 4);
+      }
     });
 
     team.squad = team.squad.filter((player) => !player.retired);
@@ -295,7 +331,7 @@ export function ageAndEvolveSquads(state) {
     while (team.squad.length < 24) {
       const posPool = ['POR', 'DEF', 'DEF', 'MED', 'MED', 'DEL'];
       const position = pick(posPool);
-      const youth = createPlayer(team.id, team.squad.length, position, Math.max(52, team.strength - 6), 1, rand(17, 20));
+      const youth = createPlayer(team.id, team.squad.length, position, Math.max(52, team.strength - 6), 1, rand(17, 20), state.year);
       youth.potential = Math.min(95, youth.overall + rand(4, 11));
       youth.history.clubs.push(team.id);
       team.squad.push(youth);

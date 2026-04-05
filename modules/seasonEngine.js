@@ -1,6 +1,6 @@
 import { simulateMatch } from './matchEngine.js';
 import { autoPickLineup } from './lineups.js';
-import { sortStandings, getTeamById, resetSeasonStats, ageAndEvolveSquads, allTeams, moodFromMomentum } from './state.js';
+import { sortStandings, getTeamById, resetSeasonStats, ageAndEvolveSquads, allTeams, moodFromMomentum, createCoachProfile } from './state.js';
 import { getSeasonAwards } from './awards.js';
 import { pushSeasonHistory, registerTeamTitle, archivePlayers, registerClubSeasonSnapshot } from './history.js';
 import { runAiTransferWindow } from './transfers.js';
@@ -25,6 +25,13 @@ const continentalRoundFormat = [
   { round: 'Semifinal', dates: [16, 17], twoLegged: true },
   { round: 'Final', dates: [20], twoLegged: false },
 ];
+const PRIZE_AMOUNTS = {
+  league: 100000000,
+  cup: 50000000,
+  champions: 500000000,
+  internationalSecondary: 200000000,
+  promotion: 25000000,
+};
 
 function addNews(state, type, text, importance = 'media') {
   state.recentNews.unshift({
@@ -36,6 +43,41 @@ function addNews(state, type, text, importance = 'media') {
     dateLabel: `Temporada ${state.season} · Semana ${state.currentMatchday}`,
   });
   state.recentNews = state.recentNews.slice(0, 120);
+}
+
+function registerFinancialEvent(state, team, payload) {
+  if (!team) return;
+  const event = {
+    id: payload.id || `fin-${state.season}-${team.id}-${Math.random().toString(36).slice(2, 8)}`,
+    season: state.season,
+    year: state.year,
+    matchday: state.currentMatchday,
+    teamId: team.id,
+    teamName: team.name,
+    type: payload.type,
+    amount: payload.amount,
+    text: payload.text,
+    meta: payload.meta || {},
+  };
+  team.financialHistory = team.financialHistory || [];
+  team.financialHistory.unshift(event);
+  team.financialHistory = team.financialHistory.slice(0, 120);
+  state.history.financialEvents = state.history.financialEvents || [];
+  state.history.financialEvents.unshift(event);
+  state.history.financialEvents = state.history.financialEvents.slice(0, 600);
+}
+
+function grantPrizeOnce(state, team, amount, typeKey, text, meta = {}) {
+  if (!team) return null;
+  const ledgerKey = `S${state.season}:${typeKey}:${team.id}`;
+  state.prizeLedger = state.prizeLedger || {};
+  if (state.prizeLedger[ledgerKey]) return null;
+  state.prizeLedger[ledgerKey] = true;
+  team.budget += amount;
+  team.finances.prizes += amount;
+  registerFinancialEvent(state, team, { id: ledgerKey, type: 'prize', amount, text, meta });
+  addNews(state, 'economy', `${team.name} recibe ${Math.round(amount / 1000000)}M€ por ${text}.`, 'media');
+  return { teamId: team.id, teamName: team.name, amount, text, typeKey };
 }
 
 function createMatchRecord(state, payload) {
@@ -658,15 +700,25 @@ function computeEuropeSlots(state, cupChampionId) {
   };
 }
 
-function assignPrizeMoney(state, summary) {
-  const champs = getTeamById(state, state.firstStandings[0].teamId);
-  const cup = getTeamById(state, state.tournaments.cup?.championTeamId);
-  if (champs) { champs.budget += 18000000; champs.finances.prizes += 18000000; }
-  if (cup) { cup.budget += 9000000; cup.finances.prizes += 9000000; }
-  if (summary?.championsWinner) {
-    const ch = getTeamById(state, state.tournaments.champions?.championTeamId?.replace('ext:', ''));
-    if (ch) { ch.budget += 12000000; ch.finances.prizes += 12000000; }
-  }
+function assignSeasonPrizeMoney(state, summary, promotedTeams = []) {
+  const prizeEvents = [];
+  const leagueChampion = getTeamById(state, state.firstStandings[0]?.teamId);
+  const cupChampion = getTeamById(state, state.tournaments.cup?.championTeamId);
+  const championsWinner = getTeamById(state, state.tournaments.champions?.championTeamId);
+  const cupWinnersWinner = getTeamById(state, state.tournaments.cupWinners?.championTeamId);
+  const continentalWinner = getTeamById(state, state.tournaments.continental2?.championTeamId);
+
+  const pushIf = (event) => { if (event) prizeEvents.push(event); };
+  pushIf(grantPrizeOnce(state, leagueChampion, PRIZE_AMOUNTS.league, 'league-title', 'ganar la Liga', { competition: 'league' }));
+  pushIf(grantPrizeOnce(state, cupChampion, PRIZE_AMOUNTS.cup, 'cup-title', 'ganar la Copa Nacional', { competition: 'cup' }));
+  pushIf(grantPrizeOnce(state, championsWinner, PRIZE_AMOUNTS.champions, 'international-champions', 'ganar la Copa de Campeones', { competition: 'champions' }));
+  pushIf(grantPrizeOnce(state, cupWinnersWinner, PRIZE_AMOUNTS.internationalSecondary, 'international-cupwinners', 'ganar la Copa de Campeones de Copa', { competition: 'cupWinners' }));
+  pushIf(grantPrizeOnce(state, continentalWinner, PRIZE_AMOUNTS.internationalSecondary, 'international-continental2', 'ganar la Copa Continental', { competition: 'continental2' }));
+  promotedTeams.forEach((team) => {
+    pushIf(grantPrizeOnce(state, team, PRIZE_AMOUNTS.promotion, 'promotion', 'ascenso a Primera División', { competition: 'promotion' }));
+  });
+  summary.prizeEvents = prizeEvents;
+  return prizeEvents;
 }
 
 function finalizeSeason(state) {
@@ -704,7 +756,7 @@ function finalizeSeason(state) {
     awards,
   };
 
-  assignPrizeMoney(state, summary);
+  assignSeasonPrizeMoney(state, summary, promoted);
 
   registerTeamTitle(state, firstChampion.id, 'league', state.season);
   if (cup?.championTeamId) registerTeamTitle(state, cup.championTeamId, 'cup', state.season);
@@ -841,6 +893,38 @@ export function simulateMatchday(state) {
 
   const labels = dayEvents.map((event) => mapCompetitionLabel(event)).join(' + ');
   return { done: false, message: `Fecha ${simulatedDate} simulada (${labels || 'sin competición'})`, summary: matchdaySummary };
+}
+
+export function dismissCoach(state, teamId) {
+  const team = getTeamById(state, teamId);
+  if (!team) return { ok: false, message: 'Equipo no encontrado' };
+  const previousCoach = team.coach || createCoachProfile();
+  const indemnizacion = Math.max(3000000, Math.round(team.budget * 0.04));
+
+  team.budget -= indemnizacion;
+  registerFinancialEvent(state, team, {
+    id: `S${state.season}:coach-dismiss:${team.id}:${previousCoach.id || previousCoach.name}`,
+    type: 'coach-dismissal',
+    amount: -indemnizacion,
+    text: `Indemnización por cese de ${previousCoach.name}`,
+    meta: { previousCoach: previousCoach.name },
+  });
+
+  const newCoach = createCoachProfile();
+  newCoach.status = 'estable';
+  team.coach = newCoach;
+  team.coach.changes.push({ season: state.season, week: state.currentMatchday, reason: 'sustitución tras cese', previousCoach: previousCoach.name });
+  state.history.coachChanges.push({
+    season: state.season,
+    week: state.currentMatchday,
+    teamId: team.id,
+    teamName: team.name,
+    outCoach: previousCoach.name,
+    inCoach: newCoach.name,
+    compensation: indemnizacion,
+  });
+  addNews(state, 'coach-change', `${team.name} cesa a ${previousCoach.name}. Nuevo entrenador: ${newCoach.name}.`, 'alta');
+  return { ok: true, message: `${team.name} cesa a ${previousCoach.name}. Llega ${newCoach.name}.`, compensation: indemnizacion };
 }
 
 export function initializeSeasonStructures(state) {

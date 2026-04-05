@@ -2,7 +2,7 @@ import { competitions } from '../data/trophies.js';
 import { FORMATIONS } from './lineups.js';
 import { getMarketPlayers, isTransferWindowOpen } from './transfers.js';
 import { money, matchCard, positionNames, standingsTable, teamBadge, trophyCard, crestSvg, kitSvg } from './renderers.js';
-import { getTeamById } from './state.js';
+import { contractSeasonsLeft, getTeamById } from './state.js';
 
 export const views = {
   dashboard: 'dashboard',
@@ -201,6 +201,7 @@ function teamDetailView(state) {
   const sorted = [...team.squad].sort((a, b) => b.overall - a.overall);
   const avgAttendance = team.stadium.seasonHomeMatches ? Math.round(team.stadium.seasonAttendanceTotal / team.stadium.seasonHomeMatches) : 0;
 
+  const financeRows = (team.financialHistory || []).slice(0, 6);
   return `<div class="grid two">
     <section class="card">
       <div class="club-head">${crestSvg(team, 72)}<div><h2>${team.name}</h2><p>División ${team.division} · Estilo ${team.style}</p></div></div>
@@ -212,12 +213,19 @@ function teamDetailView(state) {
       <select data-action="formation" data-team="${team.id}">${Object.keys(FORMATIONS).map((f) => `<option value="${f}" ${team.lineup.formation === f ? 'selected' : ''}>${f}</option>`).join('')}</select></p>
       <button class="btn" data-action="set-user-team" data-team="${team.id}">Controlar este equipo</button>
       <button class="btn" data-action="auto-team-lineup" data-team="${team.id}">Alineación óptima</button>
+      <button class="btn danger" data-action="dismiss-coach" data-team="${team.id}">Cesar entrenador</button>
       <div class="kit-row"><div><h5>Primera</h5>${kitSvg(team.kits.primary, 72)}</div><div><h5>Segunda</h5>${kitSvg(team.kits.away, 72)}</div></div>
     </section>
     <section class="card">
       <h3>Plantilla</h3>
-      <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Pos</th><th>Edad</th><th>Nac.</th><th>Med</th><th>Pot</th><th>E/F/M</th><th>Goles</th></tr></thead><tbody>
-      ${sorted.map((player) => `<tr><td>${player.name} ${player.surname}</td><td>${positionNames[player.position]}</td><td>${player.age}</td><td>${player.nationality}</td><td>${player.overall}</td><td>${player.potential}</td><td>${player.energy}/${player.form}/${player.morale}</td><td>${player.seasonGoals}</td></tr>`).join('')}
+      <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Pos</th><th>Edad</th><th>Nac.</th><th>Med</th><th>Pot</th><th>Contrato</th><th>Restante</th><th>E/F/M</th><th>Goles</th></tr></thead><tbody>
+      ${sorted.map((player) => `<tr><td>${player.name} ${player.surname}</td><td>${positionNames[player.position]}</td><td>${player.age}</td><td>${player.nationality}</td><td>${player.overall}</td><td>${player.potential}</td><td>Hasta ${player.contractEndYear || '—'}</td><td>${contractSeasonsLeft(player, state.year)} temp.</td><td>${player.energy}/${player.form}/${player.morale}</td><td>${player.seasonGoals}</td></tr>`).join('')}
+      </tbody></table></div>
+    </section>
+    <section class="card">
+      <h3>Economía reciente</h3>
+      <div class="table-wrap"><table><thead><tr><th>Concepto</th><th>Importe</th><th>Temp.</th></tr></thead><tbody>
+      ${financeRows.map((row) => `<tr><td>${row.text}</td><td>${money(row.amount)}</td><td>${row.season}</td></tr>`).join('') || '<tr><td colspan="3">Sin movimientos recientes.</td></tr>'}
       </tbody></table></div>
     </section>
     ${clubHistoryBlock(state, team)}
@@ -292,6 +300,8 @@ function endSeasonView(state) {
     <p><strong>Clasificados a Europa:</strong> ${[...summary.europeQualified.champions, ...summary.europeQualified.cupWinners, ...summary.europeQualified.continental2].join(', ')}</p>
     <p><strong>Ascensos:</strong> ${summary.promoted.join(', ')}</p>
     <p><strong>Descensos:</strong> ${summary.relegated.join(', ')}</p>
+    <h3>Premios económicos</h3>
+    <ul>${(summary.prizeEvents || []).map((event) => `<li>${event.teamName}: ${money(event.amount)} por ${event.text}</li>`).join('') || '<li>Sin premios registrados.</li>'}</ul>
   </section>`;
 }
 
