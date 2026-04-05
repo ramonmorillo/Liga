@@ -1,6 +1,6 @@
 import { competitions, getCompetitionTrophy, resolveCompetitionKey } from '../data/trophies.js';
 import { FORMATIONS } from './lineups.js';
-import { getMarketPlayers, isTransferWindowOpen } from './transfers.js';
+import { getTeamOffers, isPlayerMarketEligible, isTransferWindowOpen } from './transfers.js';
 import { money, matchCard, positionNames, standingsTable, teamBadge, trophyCard, crestSvg, kitSvg, matchEventIcon } from './renderers.js';
 import { buildPlayerStatusBadge, computePlayerStatus, ensurePlayerStatus } from './playerStatus.js';
 import { contractSeasonsLeft, getTeamById } from './state.js';
@@ -14,7 +14,6 @@ export const views = {
   standings2: 'standings2',
   teams: 'teams',
   teamDetail: 'teamDetail',
-  market: 'market',
   cupEurope: 'cupEurope',
   history: 'history',
   endSeason: 'endSeason',
@@ -28,7 +27,6 @@ export function renderNav(nav, activeView, onNavigate) {
     [views.standings1, 'Clasificación Primera'],
     [views.standings2, 'Clasificación Segunda'],
     [views.teams, 'Equipos'],
-    [views.market, 'Mercado'],
     [views.cupEurope, 'Copa y Europa'],
     [views.history, 'Historia'],
     [views.endSeason, 'Fin de temporada'],
@@ -229,6 +227,7 @@ function teamDetailView(state) {
   const tabs = [
     { key: 'squad', label: 'Plantilla' },
     { key: 'economy', label: 'Economía' },
+    { key: 'offers', label: 'Mercado' },
     { key: 'honours', label: 'Palmarés' },
   ];
   const activeTab = tabs.some((tab) => tab.key === state.ui.teamDetailTab) ? state.ui.teamDetailTab : 'squad';
@@ -281,6 +280,36 @@ function teamDetailView(state) {
     </section>`;
 
   const honoursTab = clubHistoryBlock(state, team);
+  const incomingOffers = getTeamOffers(state, team.id);
+  const playersInMarket = team.squad.filter((player) => isPlayerMarketEligible(player, state.year));
+  const userTeam = getTeamById(state, state.userTeamId);
+  const isSellerUserTeam = team.id === state.userTeamId;
+  const canBidFromUserTeam = userTeam && userTeam.id !== team.id && isTransferWindowOpen(state);
+  const offersTab = `<section class="card">
+      <h3>Mercado del club</h3>
+      <p class="small">Ventana actual: ${isTransferWindowOpen(state) ? state.transferWindow : 'cerrado'}.</p>
+      <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Pos</th><th>Edad</th><th>Valor</th><th>Contrato</th><th>Ofertas</th><th>Acciones</th></tr></thead><tbody>
+      ${playersInMarket.map((player) => {
+    const playerOffers = incomingOffers.filter((offer) => offer.playerId === player.id);
+    const offerList = playerOffers.map((offer) => `${offer.buyerTeamName}: ${money(offer.amount)} (${offer.status})`).join('<br>');
+    const bestAmount = Math.round(player.value * 1.08);
+    return `<tr>
+          <td>${player.name} ${player.surname}</td>
+          <td>${positionNames[player.position]}</td>
+          <td>${player.age}</td>
+          <td>${money(player.value)}</td>
+          <td>Hasta ${player.contractEndYear || '—'}</td>
+          <td>${offerList || '<span class="small">Sin ofertas</span>'}</td>
+          <td>
+            ${canBidFromUserTeam ? `<button class="btn" data-action="make-offer" data-seller="${team.id}" data-player="${player.id}" data-amount="${bestAmount}">Ofertar ${money(bestAmount)}</button>` : ''}
+            ${playerOffers.filter((offer) => offer.status === 'pending').map((offer) => isSellerUserTeam
+      ? `<button class="btn primary" data-action="accept-offer" data-offer="${offer.id}">Aceptar</button><button class="btn danger" data-action="reject-offer" data-offer="${offer.id}">Rechazar</button>`
+      : `<span class="small">${offer.status === 'pending' ? 'Pendiente (IA)' : offer.status}</span>`).join('')}
+          </td>
+        </tr>`;
+  }).join('') || '<tr><td colspan="7">No hay jugadores en mercado para este club.</td></tr>'}
+      </tbody></table></div>
+    </section>`;
 
   return `<div class="grid two">
     <section class="card">
@@ -300,21 +329,8 @@ function teamDetailView(state) {
       <div class="kit-row"><div><h5>Primera</h5>${kitSvg(team.kits.primary, 72)}</div><div><h5>Segunda</h5>${kitSvg(team.kits.away, 72)}</div></div>
       <div class="tabs">${tabs.map((tab) => `<button class="btn ${activeTab === tab.key ? 'primary' : ''}" data-action="team-tab" data-tab="${tab.key}">${tab.label}</button>`).join('')}</div>
     </section>
-    ${activeTab === 'squad' ? squadTab : activeTab === 'economy' ? economyTab : honoursTab}
+    ${activeTab === 'squad' ? squadTab : activeTab === 'economy' ? economyTab : activeTab === 'offers' ? offersTab : honoursTab}
   </div>`;
-}
-
-function marketView(state, filters) {
-  const userTeam = getTeamById(state, state.userTeamId);
-  const players = getMarketPlayers(state, filters).slice(0, 80);
-  return `<section class="card">
-    <h2>Mercado de fichajes (${isTransferWindowOpen(state) ? state.transferWindow : 'cerrado'})</h2>
-    <p class="small">Solo aparecen jugadores en último año de contrato y casos especiales permitidos.</p>
-    <p>Presupuesto ${userTeam.name}: <strong>${money(userTeam.budget)}</strong></p>
-    <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Club</th><th>Pos</th><th>Edad</th><th>Media</th><th>Pot</th><th>Contrato restante</th><th>Valor</th><th>Acciones</th></tr></thead><tbody>
-    ${players.map((player) => `<tr><td>${player.name} ${player.surname}</td><td>${player.teamName}</td><td>${player.position}</td><td>${player.age}</td><td>${player.overall}</td><td>${player.potential}</td><td>${Math.max(0, (player.contractEndYear || state.year) - state.year)} temp.</td><td>${money(player.value)}</td><td><button class="btn" data-action="buy" data-player="${player.id}" data-team="${player.teamId}">Oferta</button></td></tr>`).join('')}
-    </tbody></table></div>
-  </section>`;
 }
 
 function tournamentBlock(tournament) {
@@ -438,7 +454,6 @@ export function render(root, app) {
     [views.standings2]: `<section class="card"><h2>Segunda División</h2>${standingsTable(app.state.secondStandings, teamsById)}</section>`,
     [views.teams]: teamsView(app.state),
     [views.teamDetail]: teamDetailView(app.state),
-    [views.market]: marketView(app.state, app.marketFilters),
     [views.cupEurope]: cupEuropeView(app.state),
     [views.history]: historyView(app.state),
     [views.endSeason]: endSeasonView(app.state),

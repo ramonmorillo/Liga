@@ -1,19 +1,10 @@
-const COLOR_FAMILIES = {
-  es: ['Roja', 'Azul', 'Verde', 'Dorada'],
-  en: ['Red', 'Blue', 'Green', 'Golden'],
-  fr: ['Rouge', 'Bleue', 'Verte', 'Dorée'],
-  it: ['Rossa', 'Blu', 'Verde', 'Dorata'],
-  de: ['Rot', 'Blau', 'Grün', 'Gold'],
-  pt: ['Vermelha', 'Azul', 'Verde', 'Dourada'],
-};
-
 const LEAGUES = [
-  { key: 'iberia', country: 'España', language: 'es', baseName: 'Liga' },
-  { key: 'albion', country: 'Inglaterra', language: 'en', baseName: 'League' },
-  { key: 'gaulle', country: 'Francia', language: 'fr', baseName: 'Ligue' },
-  { key: 'italia', country: 'Italia', language: 'it', baseName: 'Lega' },
-  { key: 'teutonia', country: 'Alemania', language: 'de', baseName: 'Liga' },
-  { key: 'lusitania', country: 'Portugal', language: 'pt', baseName: 'Liga' },
+  { key: 'iberia', country: 'España', language: 'es', familyName: 'Liga Corona Íbera', tierName: 'División', cupName: 'Copa Corona Íbera' },
+  { key: 'albion', country: 'Inglaterra', language: 'en', familyName: 'Albion Crown League', tierName: 'Division', cupName: 'Albion Crown Cup' },
+  { key: 'gaulle', country: 'Francia', language: 'fr', familyName: 'Ligue Couronne Gauloise', tierName: 'Division', cupName: 'Coupe Couronne Gauloise' },
+  { key: 'italia', country: 'Italia', language: 'it', familyName: 'Lega Corona Italica', tierName: 'Divisione', cupName: 'Coppa Corona Italica' },
+  { key: 'teutonia', country: 'Alemania', language: 'de', familyName: 'Kronenliga Teutonia', tierName: 'Staffel', cupName: 'Teutonia Kronenpokal' },
+  { key: 'lusitania', country: 'Portugal', language: 'pt', familyName: 'Liga Coroa Lusitana', tierName: 'Divisão', cupName: 'Taça Coroa Lusitana' },
 ];
 
 const TOKENS = {
@@ -73,22 +64,13 @@ function makeTeamId(leagueKey, idx) {
   return `${leagueKey}-t${idx + 1}`;
 }
 
-function leagueColorName(leagueMeta, tier = 0) {
-  const colors = COLOR_FAMILIES[leagueMeta.language] || COLOR_FAMILIES.es;
-  return `${leagueMeta.baseName} ${colors[tier] || colors[0]}`;
+function leagueTierName(leagueMeta, tier = 1) {
+  if (tier <= 1) return `${leagueMeta.familyName}`;
+  return `${leagueMeta.familyName} · ${leagueMeta.tierName} ${tier}`;
 }
 
 function leagueCupName(leagueMeta) {
-  const color = (COLOR_FAMILIES[leagueMeta.language] || COLOR_FAMILIES.es)[1];
-  const cupByLang = {
-    es: `Copa ${color}`,
-    en: `${color} Cup`,
-    fr: `Coupe ${color}`,
-    it: `Coppa ${color}`,
-    de: `Pokal ${color}`,
-    pt: `Taça ${color}`,
-  };
-  return cupByLang[leagueMeta.language] || `${color} Cup`;
+  return leagueMeta.cupName;
 }
 
 function normalizeTeamName(name) {
@@ -167,8 +149,8 @@ function simulateLeague(leagueMeta) {
     key: leagueMeta.key,
     country: leagueMeta.country,
     language: leagueMeta.language,
-    name: leagueColorName(leagueMeta, 0),
-    divisions: [1, 2, 3, 4].map((tier) => leagueColorName(leagueMeta, tier - 1)),
+    name: leagueTierName(leagueMeta, 1),
+    divisions: [1, 2, 3, 4].map((tier) => leagueTierName(leagueMeta, tier)),
     cupName: leagueCupName(leagueMeta),
     teams,
     table,
@@ -211,8 +193,8 @@ export function normalizeExternalLeagueData(europeExternal) {
       if (!meta) return;
       league.country = meta.country;
       league.language = meta.language;
-      league.name = leagueColorName(meta, 0);
-      league.divisions = [1, 2, 3, 4].map((tier) => leagueColorName(meta, tier - 1));
+      league.name = leagueTierName(meta, 1);
+      league.divisions = [1, 2, 3, 4].map((tier) => leagueTierName(meta, tier));
       league.cupName = leagueCupName(meta);
 
       (league.teams || []).forEach((team) => {

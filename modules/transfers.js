@@ -49,6 +49,14 @@ export function getMarketPlayers(state, filters = {}) {
   });
 }
 
+function makeOfferId(state, sellerTeamId, buyerTeamId, playerId) {
+  return `offer-${state.season}-${state.currentMatchday}-${sellerTeamId}-${buyerTeamId}-${playerId}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function ensureOffers(state) {
+  if (!Array.isArray(state.transferOffers)) state.transferOffers = [];
+}
+
 function recordMovement(state, payload) {
   state.transferHistory.unshift(payload);
   state.transferHistory = state.transferHistory.slice(0, 220);
@@ -141,6 +149,140 @@ export function transferPlayer(state, fromTeamId, toTeamId, playerId, payClause 
   };
 }
 
+function transferPlayerByOffer(state, fromTeamId, toTeamId, playerId, offeredAmount) {
+  const fromTeam = getTeamById(state, fromTeamId);
+  const toTeam = getTeamById(state, toTeamId);
+  if (!fromTeam || !toTeam) return { ok: false, message: 'Equipos no válidos' };
+  if (!isTransferWindowOpen(state)) return { ok: false, message: 'Mercado cerrado' };
+
+  const player = fromTeam.squad.find((item) => item.id === playerId);
+  if (!player) return { ok: false, message: 'Jugador no encontrado' };
+  if (!isPlayerMarketEligible(player, state.year)) return { ok: false, message: 'Jugador no disponible: no está en último año de contrato' };
+  if (countNonEu(toTeam) >= 3 && isNonEu(player)) return { ok: false, message: 'Límite de 3 extracomunitarios alcanzado' };
+  if (toTeam.squad.length >= 30) return { ok: false, message: 'Plantilla compradora llena' };
+  if (fromTeam.squad.length <= 18) return { ok: false, message: 'Plantilla vendedora insuficiente' };
+
+  const transferFee = Math.max(1, Math.round(offeredAmount || player.value));
+  if (toTeam.budget < transferFee) return { ok: false, message: 'Presupuesto insuficiente' };
+
+  toTeam.budget -= transferFee;
+  fromTeam.budget += transferFee;
+  toTeam.finances.transferOut += transferFee;
+  fromTeam.finances.transferIn += transferFee;
+
+  fromTeam.squad = fromTeam.squad.filter((item) => item.id !== playerId);
+  toTeam.squad.push(player);
+  player.history.clubs.push(toTeam.id);
+
+  const movement = {
+    season: state.season,
+    year: state.year,
+    window: state.transferWindow,
+    type: 'transfer',
+    playerName: `${player.name} ${player.surname}`,
+    fromTeamId: fromTeam.id,
+    fromTeamName: fromTeam.name,
+    toTeamId: toTeam.id,
+    toTeamName: toTeam.name,
+    origin: fromTeam.name,
+    destination: toTeam.name,
+    operation: 'Traspaso',
+    fee: transferFee,
+    clauseExecuted: false,
+    notable: transferFee > 22000000,
+  };
+  recordMovement(state, movement);
+  recordTeamMovement(toTeam, { ...movement, operation: 'Fichaje', note: `Llega desde ${fromTeam.name}`, teamId: toTeam.id, teamName: toTeam.name });
+  recordTeamMovement(fromTeam, { ...movement, operation: 'Venta', note: `Sale hacia ${toTeam.name}`, teamId: fromTeam.id, teamName: fromTeam.name });
+
+  if (movement.notable) asNews(state, `${movement.playerName} ficha por ${toTeam.name} por ${transferFee.toLocaleString('es-ES')}€.`, 'alta');
+  return { ok: true, message: `Fichaje cerrado por €${transferFee.toLocaleString('es-ES')}` };
+}
+
+export function createTransferOffer(state, sellerTeamId, buyerTeamId, playerId, offeredAmount) {
+  ensureOffers(state);
+  const seller = getTeamById(state, sellerTeamId);
+  const buyer = getTeamById(state, buyerTeamId);
+  if (!seller || !buyer) return { ok: false, message: 'Equipos no válidos' };
+  if (!isTransferWindowOpen(state)) return { ok: false, message: 'Mercado cerrado' };
+  if (seller.id === buyer.id) return { ok: false, message: 'No puedes ofertar por tu propio jugador' };
+
+  const player = seller.squad.find((item) => item.id === playerId);
+  if (!player) return { ok: false, message: 'Jugador no encontrado' };
+  if (!isPlayerMarketEligible(player, state.year)) return { ok: false, message: 'Jugador no está en mercado' };
+  if (countNonEu(buyer) >= 3 && isNonEu(player)) return { ok: false, message: 'Límite de 3 extracomunitarios alcanzado' };
+
+  const amount = Math.max(1, Math.round(Number(offeredAmount) || Math.round(player.value * 1.05)));
+  if (amount > buyer.budget) return { ok: false, message: 'Presupuesto insuficiente para esa oferta' };
+
+  const duplicatePending = state.transferOffers.find((offer) => offer.status === 'pending' && offer.sellerTeamId === seller.id
+    && offer.buyerTeamId === buyer.id && offer.playerId === player.id);
+  if (duplicatePending) return { ok: false, message: 'Ya existe una oferta pendiente para este jugador y club' };
+
+  const offer = {
+    id: makeOfferId(state, seller.id, buyer.id, player.id),
+    season: state.season,
+    matchday: state.currentMatchday,
+    status: 'pending',
+    sellerTeamId: seller.id,
+    sellerTeamName: seller.name,
+    buyerTeamId: buyer.id,
+    buyerTeamName: buyer.name,
+    playerId: player.id,
+    playerName: `${player.name} ${player.surname}`,
+    playerPosition: player.position,
+    playerAge: player.age,
+    playerValue: player.value,
+    playerContractEndYear: player.contractEndYear,
+    amount,
+    createdAt: Date.now(),
+    resolvedAt: null,
+  };
+  state.transferOffers.unshift(offer);
+  state.transferOffers = state.transferOffers.slice(0, 400);
+  return { ok: true, message: `Oferta enviada por €${amount.toLocaleString('es-ES')}` };
+}
+
+export function resolveTransferOffer(state, offerId, decision = 'reject') {
+  ensureOffers(state);
+  const offer = state.transferOffers.find((item) => item.id === offerId);
+  if (!offer) return { ok: false, message: 'Oferta no encontrada' };
+  if (offer.status !== 'pending') return { ok: false, message: 'La oferta ya fue resuelta' };
+  const seller = getTeamById(state, offer.sellerTeamId);
+  if (!seller) return { ok: false, message: 'Equipo vendedor no encontrado' };
+
+  if (decision === 'accept') {
+    const result = transferPlayerByOffer(state, offer.sellerTeamId, offer.buyerTeamId, offer.playerId, offer.amount);
+    if (!result.ok) return result;
+    offer.status = 'accepted';
+    offer.resolvedAt = Date.now();
+    return { ok: true, message: result.message };
+  }
+
+  offer.status = 'rejected';
+  offer.resolvedAt = Date.now();
+  return { ok: true, message: 'Oferta rechazada' };
+}
+
+export function getTeamOffers(state, teamId) {
+  ensureOffers(state);
+  return state.transferOffers.filter((offer) => offer.sellerTeamId === teamId);
+}
+
+function shouldAiAcceptOffer(state, offer) {
+  const seller = getTeamById(state, offer.sellerTeamId);
+  if (!seller) return false;
+  const player = seller.squad.find((item) => item.id === offer.playerId);
+  if (!player) return false;
+  const yearsLeft = Math.max(0, (player.contractEndYear || state.year) - state.year);
+  const pressure = player.age >= 30 ? 0.08 : 0;
+  const contractPressure = yearsLeft === 0 ? 0.17 : yearsLeft === 1 ? 0.08 : 0;
+  const qualityPenalty = player.overall >= 84 ? 0.08 : 0;
+  const ratio = offer.amount / Math.max(1, player.value);
+  const threshold = 1.03 + qualityPenalty - pressure - contractPressure;
+  return ratio >= threshold;
+}
+
 export function runAiTransferWindow(state) {
   const teams = allTeams(state).filter((team) => team.id !== state.userTeamId);
   teams.forEach((buyer) => {
@@ -163,8 +305,19 @@ export function runAiTransferWindow(state) {
     });
 
     if (!target) return;
-    transferPlayer(state, target.seller.id, buyer.id, target.player.id, Math.random() < 0.3);
+    const offeredAmount = Math.min(target.player.clause, Math.round(target.player.value * (1.02 + Math.random() * 0.2)));
+    createTransferOffer(state, target.seller.id, buyer.id, target.player.id, offeredAmount);
   });
+
+  ensureOffers(state);
+  state.transferOffers
+    .filter((offer) => offer.status === 'pending')
+    .forEach((offer) => {
+      const sellerIsUserTeam = offer.sellerTeamId === state.userTeamId;
+      if (sellerIsUserTeam) return;
+      const decision = shouldAiAcceptOffer(state, offer) ? 'accept' : 'reject';
+      resolveTransferOffer(state, offer.id, decision);
+    });
 }
 
 
