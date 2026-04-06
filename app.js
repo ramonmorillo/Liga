@@ -157,6 +157,22 @@ function bindViewActions() {
     });
   });
 
+  root.querySelectorAll('[data-action="intl-tab"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      app.state.ui = app.state.ui || {};
+      app.state.ui.internationalTab = button.dataset.tab;
+      repaint();
+    });
+  });
+
+  root.querySelectorAll('[data-action="honours-tab"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      app.state.ui = app.state.ui || {};
+      app.state.ui.honoursTab = button.dataset.tab;
+      repaint();
+    });
+  });
+
   root.querySelectorAll('[data-action="release-player"]').forEach((button) => {
     button.addEventListener('click', () => {
       const team = getTeamById(app.state, button.dataset.team);
