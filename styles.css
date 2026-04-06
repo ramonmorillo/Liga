@@ -75,3 +75,20 @@ th { color: var(--muted); font-size: 0.85rem; text-align: left; }
 .trophy-grid.compact { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.5rem; margin-bottom: 0.75rem; }
 .trophy-row { display: flex; gap: 0.55rem; align-items: center; padding: 0.45rem; border: 1px solid color-mix(in srgb, var(--accent), #fff 16%); border-radius: 10px; background: rgba(255,255,255,0.02); }
 .trophy-mark { font-size: 1.25rem; }
+.pitch { position: relative; min-height: 520px; border-radius: 14px; border: 1px solid #3f6c57; background:
+  radial-gradient(circle at 50% 50%, rgba(255,255,255,0.08) 0 8%, transparent 9% 100%),
+  linear-gradient(180deg, #1c6a3f 0%, #185f39 100%);
+  overflow: hidden;
+}
+.pitch::before, .pitch::after { content: ''; position: absolute; left: 50%; transform: translateX(-50%); border: 2px solid rgba(255,255,255,0.35); }
+.pitch::before { inset: 6% 10%; border-radius: 10px; }
+.pitch::after { top: 48%; width: 80%; height: 0; border-top-width: 2px; border-right: 0; border-left: 0; border-bottom: 0; }
+.lineup-slot { position: absolute; transform: translate(-50%, -50%); min-width: 130px; text-align: left; display: grid; gap: 0.1rem; background: rgba(10, 20, 30, 0.82); border: 1px solid #7fd3ff; border-radius: 10px; padding: 0.35rem 0.45rem; color: #eff6ff; cursor: pointer; }
+.lineup-slot strong { font-size: 0.78rem; }
+.lineup-slot span { font-size: 0.68rem; color: #c6d2e9; }
+.lineup-slot.out-of-role { border-color: #ffd166; box-shadow: 0 0 0 1px rgba(255, 209, 102, 0.4) inset; }
+.event-icon { width: 1rem; height: 1rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; font-size: 0.78rem; margin-right: 0.2rem; }
+.event-icon.yellow { background: #facc15; border: 1px solid #fde68a; }
+.event-icon.red { background: #ef4444; border: 1px solid #fecaca; }
+.event-icon.injury { background: #7c3aed; color: #f3e8ff; font-weight: 700; }
+.event-icon.penalty, .event-icon.goal, .event-icon.own-goal { background: #0f172a; color: #bfdbfe; border: 1px solid #334155; }

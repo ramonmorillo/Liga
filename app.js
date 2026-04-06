@@ -1,8 +1,8 @@
 import { render, renderNav, views } from './modules/ui.js';
 import { clearGame, ensureGame, exportGame, importGame, saveGame } from './modules/storage.js';
-import { autoPickLineup } from './modules/lineups.js';
+import { autoPickLineup, swapLineupPlayer } from './modules/lineups.js';
 import { allTeams, createNewGame, getTeamById } from './modules/state.js';
-import { dismissCoach, hireCoach, initializeSeasonStructures, simulateMatchday } from './modules/seasonEngine.js';
+import { acceptSponsorOffer, dismissCoach, hireCoach, initializeSeasonStructures, rejectSponsorOffer, simulateMatchday } from './modules/seasonEngine.js';
 import { createTransferOffer, releasePlayer, resolveTransferOffer } from './modules/transfers.js';
 
 const app = {
@@ -114,6 +114,23 @@ function bindViewActions() {
     button.addEventListener('click', () => {
       app.state.ui = app.state.ui || {};
       app.state.ui.teamDetailTab = button.dataset.tab;
+      if (button.dataset.tab !== 'lineup') app.state.ui.selectedLineupSlot = null;
+      repaint();
+    });
+  });
+  root.querySelectorAll('[data-action="select-slot"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      app.state.ui = app.state.ui || {};
+      app.state.ui.selectedLineupSlot = button.dataset.slot;
+      repaint();
+    });
+  });
+  root.querySelectorAll('[data-action="swap-lineup"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const team = getTeamById(app.state, button.dataset.team);
+      if (!team) return;
+      const result = swapLineupPlayer(team, button.dataset.slot, button.dataset.player);
+      if (!result.ok) alert(result.message);
       repaint();
     });
   });
@@ -170,6 +187,17 @@ function bindViewActions() {
     button.addEventListener('click', () => {
       const decision = button.dataset.action === 'accept-offer' ? 'accept' : 'reject';
       const result = resolveTransferOffer(app.state, button.dataset.offer, decision);
+      alert(result.message);
+      repaint();
+    });
+  });
+
+  root.querySelectorAll('[data-action="accept-sponsor"], [data-action="reject-sponsor"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const isAccept = button.dataset.action === 'accept-sponsor';
+      const result = isAccept
+        ? acceptSponsorOffer(app.state, button.dataset.team, button.dataset.offer)
+        : rejectSponsorOffer(app.state, button.dataset.team, button.dataset.offer);
       alert(result.message);
       repaint();
     });
