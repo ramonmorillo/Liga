@@ -54,11 +54,17 @@ th { color: var(--muted); font-size: 0.85rem; text-align: left; }
 .match-detail .vs { margin: 0 0.7rem; color: var(--muted); }
 .round { margin-top: 0.6rem; }
 .round h4 { margin: 0.2rem 0; }
-.bracket { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.55rem; align-items: start; }
-.bracket-col { background: rgba(13, 19, 33, 0.5); border: 1px solid var(--border); border-radius: 10px; padding: 0.45rem; }
-.bracket-col h4 { margin: 0 0 0.35rem; font-size: 0.9rem; }
-.bracket-match { border: 1px solid #30405f; border-radius: 8px; padding: 0.35rem; margin-bottom: 0.35rem; background: rgba(255, 255, 255, 0.02); }
-.bracket-match small { color: var(--muted); }
+.bracket { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0.7rem; align-items: start; }
+.bracket-col { background: rgba(13, 19, 33, 0.5); border: 1px solid var(--border); border-radius: 12px; padding: 0.55rem; }
+.bracket-col h4 { margin: 0 0 0.45rem; font-size: 0.9rem; color: #d3e5ff; letter-spacing: 0.3px; }
+.bracket-match { border: 1px solid #30405f; border-radius: 10px; padding: 0.45rem; margin-bottom: 0.5rem; background: rgba(255, 255, 255, 0.02); display: grid; gap: 0.35rem; }
+.bracket-teams { display: grid; gap: 0.18rem; }
+.bracket-match.pending { border-color: #3e5a8d; background: rgba(25, 39, 63, 0.35); }
+.bracket-match.played { border-color: #2f7b59; background: rgba(17, 58, 45, 0.28); }
+.bracket-match.is-final { box-shadow: 0 0 0 1px rgba(244, 208, 63, 0.45) inset; }
+.bracket-match small { color: var(--muted); font-size: 0.78rem; }
+.round-status { font-size: 0.74rem; color: #bfd0f2; border: 1px solid #425a86; border-radius: 999px; padding: 0.05rem 0.4rem; justify-self: start; }
+.bracket-match.played .round-status { border-color: #3f8d70; color: #bdf3da; }
 .club-head { display: flex; align-items: center; gap: 0.8rem; }
 .kit-row { display: flex; gap: 1.2rem; align-items: flex-start; }
 .crest { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }

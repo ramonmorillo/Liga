@@ -14,7 +14,9 @@ export const views = {
   standings2: 'standings2',
   teams: 'teams',
   teamDetail: 'teamDetail',
-  cupEurope: 'cupEurope',
+  cupNational: 'cupNational',
+  international: 'international',
+  honours: 'honours',
   history: 'history',
   endSeason: 'endSeason',
 };
@@ -26,8 +28,10 @@ export function renderNav(nav, activeView, onNavigate) {
     [views.matchday, 'Jornada'],
     [views.standings1, 'Clasificación Primera'],
     [views.standings2, 'Clasificación Segunda'],
+    [views.cupNational, 'Copa Nacional'],
+    [views.international, 'Comp. Internacionales'],
+    [views.honours, 'Palmarés'],
     [views.teams, 'Equipos'],
-    [views.cupEurope, 'Copa y Europa'],
     [views.history, 'Historia'],
     [views.endSeason, 'Fin de temporada'],
   ];
@@ -382,17 +386,45 @@ function teamDetailView(state) {
 function tournamentBlock(tournament) {
   if (!tournament) return '<article class="card"><p>No disponible en esta temporada.</p></article>';
   if (tournament.skipped) return `<article class="card"><h3>${tournament.title}</h3><p class="small">No disputada: ${tournament.skipReason}.</p></article>`;
-  const roundColumn = (round) => `<div class="bracket-col"><h4>${round.round}</h4>${round.matches.map((m) => {
+  const roundColumn = (round, idx, rounds) => `<div class="bracket-col">
+    <h4>${round.round}</h4>
+    ${round.matches.map((m) => {
+    const isPlayed = Boolean(m.winnerId);
+    const isFinalRound = idx === rounds.length - 1;
     const home = m.winnerId === m.homeTeamId ? `<strong>${m.homeName}</strong>` : m.homeName;
     const away = m.winnerId === m.awayTeamId ? `<strong>${m.awayName}</strong>` : m.awayName;
-    const legs = [m.leg1?.score, m.leg2?.score].filter(Boolean).join(' · ');
-    return `<div class="bracket-match"><div>${home}</div><div>${away}</div><small>${legs || 'Pendiente'}${m.aggregate ? ` · Global ${m.aggregate}` : ''}</small></div>`;
-  }).join('') || '<div class="bracket-match"><small>Pendiente</small></div>'}</div>`;
+    const leg1 = m.leg1?.score ? `Ida ${m.leg1.score}` : null;
+    const leg2 = m.leg2?.score ? `Vuelta ${m.leg2.score}` : null;
+    const legInfo = [leg1, leg2].filter(Boolean).join(' · ');
+    const aggregate = m.aggregate ? `Global ${m.aggregate}` : '';
+    const statusLabel = isPlayed ? 'Completado' : 'Pendiente';
+    return `<div class="bracket-match ${isPlayed ? 'played' : 'pending'} ${isFinalRound ? 'is-final' : ''}">
+      <div class="bracket-teams"><span>${home}</span><span>${away}</span></div>
+      <small>${[legInfo, aggregate].filter(Boolean).join(' · ') || 'Cruce pendiente'}</small>
+      <span class="round-status">${statusLabel}</span>
+    </div>`;
+  }).join('') || '<div class="bracket-match pending"><small>Pendiente</small><span class="round-status">Pendiente</span></div>'}
+  </div>`;
 
   return `<article class="card">
     <h3>${tournament.title}</h3>
     <p><strong>Campeón:</strong> ${tournament.championName || 'Pendiente'}</p>
-    <div class="bracket">${tournament.rounds.map(roundColumn).join('')}</div>
+    <div class="bracket">${tournament.rounds.map((round, idx, rounds) => roundColumn(round, idx, rounds)).join('')}</div>
+  </article>`;
+}
+
+function palmaresTableCard(title, editions, includeRunnerUp = false) {
+  const totals = editions.reduce((acc, entry) => {
+    acc[entry.champion] = (acc[entry.champion] || 0) + 1;
+    return acc;
+  }, {});
+
+  return `<article class="card">
+    <h4>${title}</h4>
+    <p class="small">${Object.entries(totals).map(([club, count]) => `${club} (${count})`).join(' · ') || 'Sin títulos registrados.'}</p>
+    <div class="table-wrap"><table><thead><tr><th>Temp.</th><th>Campeón</th>${includeRunnerUp ? '<th>Subcampeón</th>' : ''}</tr></thead><tbody>
+    ${[...editions].reverse().map((entry) => `<tr><td>${entry.season}</td><td>${entry.champion}</td>${includeRunnerUp ? `<td>${entry.runnerUp || '—'}</td>` : ''}</tr>`).join('')}
+    </tbody></table></div>
   </article>`;
 }
 
@@ -401,48 +433,97 @@ function internationalPalmaresBlock(state) {
   const items = Object.entries(data);
   if (!items.length) return '<article class="card"><h3>Palmarés internacional</h3><p class="small">Sin ediciones cerradas todavía.</p></article>';
 
-  return `<article class="card"><h3>Palmarés internacional</h3>
+  return `<section class="grid">
     ${items.map(([key, editions]) => {
-      const totals = editions.reduce((acc, entry) => {
-        acc[entry.champion] = (acc[entry.champion] || 0) + 1;
-        return acc;
-      }, {});
-      return `<div class="round"><h4>${editions[0]?.competition || key}</h4>
-        <p class="small">${Object.entries(totals).map(([club, count]) => `${club} (${count})`).join(' · ')}</p>
-        <div class="table-wrap"><table><thead><tr><th>Temp.</th><th>Campeón</th><th>Subcampeón</th></tr></thead><tbody>
-        ${[...editions].reverse().map((entry) => `<tr><td>${entry.season}</td><td>${entry.champion}</td><td>${entry.runnerUp || '—'}</td></tr>`).join('')}
-        </tbody></table></div>
-      </div>`;
+      const title = editions[0]?.competition || key;
+      return palmaresTableCard(title, editions, true);
     }).join('')}
-  </article>`;
+  </section>`;
 }
 
-function cupEuropeView(state) {
+function cupNationalView(state) {
   const summary = state.lastSeasonSummary;
-  return `<section class="card"><h2>Copa y Europa</h2>
-    <div class="grid two">
-      ${trophyCard(competitions.league.name, competitions.league.icon, competitions.league.accent, summary?.leagueChampion)}
-      ${trophyCard(competitions.league2.name, competitions.league2.icon, competitions.league2.accent, summary?.secondDivisionChampion)}
-      ${trophyCard(competitions.cup.name, competitions.cup.icon, competitions.cup.accent, summary?.cupChampion)}
-      ${trophyCard(competitions.supercup.name, competitions.supercup.icon, competitions.supercup.accent, summary?.supercupWinner)}
-      ${trophyCard(competitions.champions.name, competitions.champions.icon, competitions.champions.accent, summary?.championsWinner)}
-      ${trophyCard(competitions.cupWinners.name, competitions.cupWinners.icon, competitions.cupWinners.accent, summary?.cupWinnersWinner)}
-      ${trophyCard(competitions.continental2.name, competitions.continental2.icon, competitions.continental2.accent, summary?.continental2Winner)}
-      ${trophyCard(competitions.internationalSupercup.name, competitions.internationalSupercup.icon, competitions.internationalSupercup.accent, summary?.internationalSupercupWinner)}
-    </div>
-    <div class="grid two">
-      ${tournamentBlock(state.tournaments.supercup)}
-      ${tournamentBlock(state.tournaments.internationalSupercup)}
-      ${tournamentBlock(state.tournaments.cup)}
-      ${tournamentBlock(state.tournaments.champions)}
-      ${tournamentBlock(state.tournaments.cupWinners)}
-      ${tournamentBlock(state.tournaments.continental2)}
-    </div>
-    ${internationalPalmaresBlock(state)}
+  return `<section class="grid">
+    <article class="card">
+      <h2>Copa Nacional</h2>
+      <div class="grid two">
+        ${trophyCard(competitions.cup.name, competitions.cup.icon, competitions.cup.accent, summary?.cupChampion)}
+        ${trophyCard(competitions.supercup.name, competitions.supercup.icon, competitions.supercup.accent, summary?.supercupWinner)}
+      </div>
+    </article>
+    ${tournamentBlock(state.tournaments.cup)}
+    ${tournamentBlock(state.tournaments.supercup)}
+  </section>`;
+}
+
+const internationalTabs = [
+  { key: 'champions', label: competitions.champions.name, tournamentKey: 'champions' },
+  { key: 'cupWinners', label: competitions.cupWinners.name, tournamentKey: 'cupWinners' },
+  { key: 'continental2', label: competitions.continental2.name, tournamentKey: 'continental2' },
+  { key: 'internationalSupercup', label: competitions.internationalSupercup.name, tournamentKey: 'internationalSupercup' },
+];
+
+function internationalCompetitionsView(state) {
+  state.ui = state.ui || {};
+  const activeKey = internationalTabs.some((tab) => tab.key === state.ui.internationalTab)
+    ? state.ui.internationalTab
+    : internationalTabs[0].key;
+  const active = internationalTabs.find((tab) => tab.key === activeKey) || internationalTabs[0];
+  const summary = state.lastSeasonSummary;
+
+  const winnerMap = {
+    champions: summary?.championsWinner,
+    cupWinners: summary?.cupWinnersWinner,
+    continental2: summary?.continental2Winner,
+    internationalSupercup: summary?.internationalSupercupWinner,
+  };
+
+  return `<section class="grid">
+    <article class="card">
+      <h2>Competiciones Internacionales</h2>
+      <p class="small">Sigue cada torneo en su pestaña independiente.</p>
+      <div class="tabs">${internationalTabs.map((tab) => `<button class="btn ${tab.key === activeKey ? 'primary' : ''}" data-action="intl-tab" data-tab="${tab.key}">${tab.label}</button>`).join('')}</div>
+      <div class="grid two">
+        ${trophyCard(competitions[active.key].name, competitions[active.key].icon, competitions[active.key].accent, winnerMap[active.key])}
+      </div>
+    </article>
+    ${tournamentBlock(state.tournaments[active.tournamentKey])}
     <article class="card"><h3>Ligas europeas ficticias</h3>
     <div class="table-wrap"><table><thead><tr><th>Liga</th><th>Campeón</th><th>Campeón de copa</th></tr></thead><tbody>
     ${(state.europeExternal.leagues || []).map((l) => `<tr><td>${l.name}</td><td>${l.champion}</td><td>${l.cupChampion}</td></tr>`).join('') || '<tr><td colspan="3">Se generarán al cerrar la temporada 1.</td></tr>'}
     </tbody></table></div></article>
+  </section>`;
+}
+
+function palmaresNationalBlock(state) {
+  const rows = [...(state.history.globalBySeason || [])];
+  if (!rows.length) return '<article class="card"><h3>Palmarés nacional</h3><p class="small">Sin temporadas finalizadas aún.</p></article>';
+
+  const byCompetition = {
+    [competitions.league.name]: rows.map((row) => ({ season: row.season, champion: row.leagueChampion })),
+    [competitions.league2.name]: rows.map((row) => ({ season: row.season, champion: row.secondDivisionChampion })).filter((row) => row.champion),
+    [competitions.cup.name]: rows.map((row) => ({ season: row.season, champion: row.cupChampion })),
+    [competitions.supercup.name]: rows.map((row) => ({ season: row.season, champion: row.supercupWinner })).filter((row) => row.champion && row.champion !== 'Pendiente'),
+  };
+
+  return `<section class="grid">
+    ${Object.entries(byCompetition).map(([title, editions]) => palmaresTableCard(title, editions)).join('')}
+  </section>`;
+}
+
+function honoursView(state) {
+  state.ui = state.ui || {};
+  const active = state.ui.honoursTab === 'international' ? 'international' : 'national';
+  return `<section class="grid">
+    <article class="card">
+      <h2>Palmarés</h2>
+      <p class="small">Histórico separado de las competiciones activas.</p>
+      <div class="tabs">
+        <button class="btn ${active === 'national' ? 'primary' : ''}" data-action="honours-tab" data-tab="national">Palmarés nacional</button>
+        <button class="btn ${active === 'international' ? 'primary' : ''}" data-action="honours-tab" data-tab="international">Palmarés internacional</button>
+      </div>
+    </article>
+    ${active === 'national' ? palmaresNationalBlock(state) : internationalPalmaresBlock(state)}
   </section>`;
 }
 
@@ -503,7 +584,9 @@ export function render(root, app) {
     [views.standings2]: `<section class="card"><h2>Segunda División</h2>${standingsTable(app.state.secondStandings, teamsById)}</section>`,
     [views.teams]: teamsView(app.state),
     [views.teamDetail]: teamDetailView(app.state),
-    [views.cupEurope]: cupEuropeView(app.state),
+    [views.cupNational]: cupNationalView(app.state),
+    [views.international]: internationalCompetitionsView(app.state),
+    [views.honours]: honoursView(app.state),
     [views.history]: historyView(app.state),
     [views.endSeason]: endSeasonView(app.state),
   };
