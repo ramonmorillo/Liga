@@ -4,44 +4,153 @@ export const FORMATIONS = {
   '4-3-3': { POR: 1, DEF: 4, MED: 3, DEL: 3 },
   '4-4-2': { POR: 1, DEF: 4, MED: 4, DEL: 2 },
   '4-2-3-1': { POR: 1, DEF: 4, MED: 5, DEL: 1 },
+  '3-5-2': { POR: 1, DEF: 3, MED: 5, DEL: 2 },
 };
 
+const FORMATION_LAYOUTS = {
+  '4-3-3': [
+    { slotId: 'GK', role: 'POR', position: 'POR', x: 50, y: 92 },
+    { slotId: 'LB', role: 'LI', position: 'DEF', x: 18, y: 74 },
+    { slotId: 'LCB', role: 'DFC', position: 'DEF', x: 38, y: 78 },
+    { slotId: 'RCB', role: 'DFC', position: 'DEF', x: 62, y: 78 },
+    { slotId: 'RB', role: 'LD', position: 'DEF', x: 82, y: 74 },
+    { slotId: 'LCM', role: 'MC', position: 'MED', x: 34, y: 56 },
+    { slotId: 'CM', role: 'MCD', position: 'MED', x: 50, y: 60 },
+    { slotId: 'RCM', role: 'MC', position: 'MED', x: 66, y: 56 },
+    { slotId: 'LW', role: 'EI', position: 'DEL', x: 24, y: 30 },
+    { slotId: 'ST', role: 'DC', position: 'DEL', x: 50, y: 24 },
+    { slotId: 'RW', role: 'ED', position: 'DEL', x: 76, y: 30 },
+  ],
+  '4-4-2': [
+    { slotId: 'GK', role: 'POR', position: 'POR', x: 50, y: 92 },
+    { slotId: 'LB', role: 'LI', position: 'DEF', x: 18, y: 74 },
+    { slotId: 'LCB', role: 'DFC', position: 'DEF', x: 38, y: 78 },
+    { slotId: 'RCB', role: 'DFC', position: 'DEF', x: 62, y: 78 },
+    { slotId: 'RB', role: 'LD', position: 'DEF', x: 82, y: 74 },
+    { slotId: 'LM', role: 'MI', position: 'MED', x: 20, y: 50 },
+    { slotId: 'LCM', role: 'MC', position: 'MED', x: 40, y: 56 },
+    { slotId: 'RCM', role: 'MC', position: 'MED', x: 60, y: 56 },
+    { slotId: 'RM', role: 'MD', position: 'MED', x: 80, y: 50 },
+    { slotId: 'LS', role: 'SD', position: 'DEL', x: 42, y: 28 },
+    { slotId: 'RS', role: 'DC', position: 'DEL', x: 58, y: 28 },
+  ],
+  '4-2-3-1': [
+    { slotId: 'GK', role: 'POR', position: 'POR', x: 50, y: 92 },
+    { slotId: 'LB', role: 'LI', position: 'DEF', x: 18, y: 74 },
+    { slotId: 'LCB', role: 'DFC', position: 'DEF', x: 38, y: 78 },
+    { slotId: 'RCB', role: 'DFC', position: 'DEF', x: 62, y: 78 },
+    { slotId: 'RB', role: 'LD', position: 'DEF', x: 82, y: 74 },
+    { slotId: 'LDM', role: 'MCD', position: 'MED', x: 38, y: 62 },
+    { slotId: 'RDM', role: 'MCD', position: 'MED', x: 62, y: 62 },
+    { slotId: 'LAM', role: 'MCO', position: 'MED', x: 28, y: 42 },
+    { slotId: 'CAM', role: 'MCO', position: 'MED', x: 50, y: 38 },
+    { slotId: 'RAM', role: 'MCO', position: 'MED', x: 72, y: 42 },
+    { slotId: 'ST', role: 'DC', position: 'DEL', x: 50, y: 24 },
+  ],
+  '3-5-2': [
+    { slotId: 'GK', role: 'POR', position: 'POR', x: 50, y: 92 },
+    { slotId: 'LCB', role: 'DFC', position: 'DEF', x: 30, y: 76 },
+    { slotId: 'CB', role: 'DFC', position: 'DEF', x: 50, y: 80 },
+    { slotId: 'RCB', role: 'DFC', position: 'DEF', x: 70, y: 76 },
+    { slotId: 'LWB', role: 'CAI', position: 'MED', x: 14, y: 52 },
+    { slotId: 'LCM', role: 'MC', position: 'MED', x: 34, y: 56 },
+    { slotId: 'CM', role: 'MCD', position: 'MED', x: 50, y: 60 },
+    { slotId: 'RCM', role: 'MC', position: 'MED', x: 66, y: 56 },
+    { slotId: 'RWB', role: 'CAD', position: 'MED', x: 86, y: 52 },
+    { slotId: 'LS', role: 'SD', position: 'DEL', x: 42, y: 28 },
+    { slotId: 'RS', role: 'DC', position: 'DEL', x: 58, y: 28 },
+  ],
+};
+
+function getLayout(formation) {
+  return FORMATION_LAYOUTS[formation] || FORMATION_LAYOUTS['4-3-3'];
+}
+
+function roleCompatibility(player, slot) {
+  if (!player || !slot) return 0.4;
+  if (player.position === slot.position) return 1;
+  if (slot.position === 'MED' && player.position === 'DEL') return 0.78;
+  if (slot.position === 'DEL' && player.position === 'MED') return 0.82;
+  if (slot.position === 'DEF' && player.position === 'MED') return 0.68;
+  if (slot.position === 'MED' && player.position === 'DEF') return 0.74;
+  if (slot.position === 'POR') return player.position === 'POR' ? 1 : 0.15;
+  return 0.52;
+}
+
+function playerSlotScore(player, slot) {
+  return playerScore(player) * roleCompatibility(player, slot);
+}
+
 export function autoPickLineup(team, formation = team.tactics?.formation || '4-3-3') {
-  const shape = FORMATIONS[formation] || FORMATIONS['4-3-3'];
-  const starters = [];
-  Object.entries(shape).forEach(([position, amount]) => {
-    const options = team.squad
-      .filter((player) => {
-        const status = ensurePlayerStatus(player);
-        return player.position === position && status.injuryGamesRemaining <= 0;
-      })
-      .sort((a, b) => playerScore(b) - playerScore(a))
-      .slice(0, amount)
-      .map((player) => player.id);
-    starters.push(...options);
+  const resolvedFormation = FORMATIONS[formation] ? formation : '4-3-3';
+  const fitPlayers = team.squad
+    .filter((player) => ensurePlayerStatus(player).injuryGamesRemaining <= 0)
+    .sort((a, b) => playerScore(b) - playerScore(a));
+  const used = new Set();
+  const starterSlots = getLayout(resolvedFormation).map((slot) => {
+    const best = fitPlayers
+      .filter((player) => !used.has(player.id))
+      .sort((a, b) => playerSlotScore(b, slot) - playerSlotScore(a, slot))[0];
+    if (best) used.add(best.id);
+    return {
+      ...slot,
+      playerId: best?.id || null,
+      adaptation: best ? roleCompatibility(best, slot) : 0,
+    };
   });
 
-  const bench = team.squad
-    .filter((player) => {
-      const status = ensurePlayerStatus(player);
-      return !starters.includes(player.id) && status.injuryGamesRemaining <= 0;
-    })
+  const starters = starterSlots.map((slot) => slot.playerId).filter(Boolean);
+  const bench = fitPlayers
+    .filter((player) => !used.has(player.id))
     .sort((a, b) => playerScore(b) - playerScore(a))
     .slice(0, 7)
     .map((player) => player.id);
 
-  return { formation, starters, bench };
+  return { formation: resolvedFormation, starters, bench, starterSlots };
 }
 
 export function validateLineup(team, lineup) {
-  const shape = FORMATIONS[lineup.formation] || FORMATIONS['4-3-3'];
+  if (!lineup?.starters?.length) return false;
   if (lineup.starters.length !== 11) return false;
-  const count = { POR: 0, DEF: 0, MED: 0, DEL: 0 };
-  lineup.starters.forEach((id) => {
-    const player = team.squad.find((item) => item.id === id);
-    if (player) count[player.position] += 1;
-  });
-  return Object.entries(shape).every(([position, needed]) => count[position] === needed);
+  const unique = new Set(lineup.starters);
+  if (unique.size !== 11) return false;
+  return lineup.starters.every((id) => team.squad.some((player) => player.id === id));
+}
+
+export function ensureLineupSlots(team) {
+  if (!team?.lineup) {
+    team.lineup = autoPickLineup(team, team?.tactics?.formation);
+    return team.lineup;
+  }
+  const hasValidSlots = Array.isArray(team.lineup.starterSlots)
+    && team.lineup.starterSlots.length === 11
+    && team.lineup.starterSlots.every((slot) => slot?.slotId && 'x' in slot && 'y' in slot);
+  if (hasValidSlots) return team.lineup;
+  team.lineup = autoPickLineup(team, team.lineup.formation || team.tactics?.formation || '4-3-3');
+  return team.lineup;
+}
+
+export function swapLineupPlayer(team, slotId, incomingPlayerId) {
+  const lineup = ensureLineupSlots(team);
+  const slot = lineup.starterSlots.find((entry) => entry.slotId === slotId);
+  const incoming = team.squad.find((player) => player.id === incomingPlayerId);
+  if (!slot || !incoming) return { ok: false, message: 'Cambio no válido' };
+  if (ensurePlayerStatus(incoming).injuryGamesRemaining > 0) return { ok: false, message: 'Jugador lesionado' };
+
+  const currentStarterId = slot.playerId;
+  const occupiedSlot = lineup.starterSlots.find((entry) => entry.playerId === incomingPlayerId);
+  if (occupiedSlot) occupiedSlot.playerId = currentStarterId;
+  slot.playerId = incomingPlayerId;
+  slot.adaptation = roleCompatibility(incoming, slot);
+
+  lineup.starters = lineup.starterSlots.map((entry) => entry.playerId).filter(Boolean);
+  lineup.bench = team.squad
+    .filter((player) => !lineup.starters.includes(player.id) && ensurePlayerStatus(player).injuryGamesRemaining <= 0)
+    .sort((a, b) => playerScore(b) - playerScore(a))
+    .slice(0, 9)
+    .map((player) => player.id);
+
+  return { ok: true, message: 'Cambio aplicado', adaptation: slot.adaptation };
 }
 
 export function lineupStrength(team, lineup) {

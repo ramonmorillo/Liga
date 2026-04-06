@@ -1,5 +1,5 @@
 import { competitions, getCompetitionTrophy, resolveCompetitionKey } from '../data/trophies.js';
-import { FORMATIONS } from './lineups.js';
+import { FORMATIONS, ensureLineupSlots, playerScore } from './lineups.js';
 import { getTeamOffers, isPlayerMarketEligible, isTransferWindowOpen } from './transfers.js';
 import { money, matchCard, positionNames, standingsTable, teamBadge, trophyCard, crestSvg, kitSvg, matchEventIcon } from './renderers.js';
 import { buildPlayerStatusBadge, computePlayerStatus, ensurePlayerStatus } from './playerStatus.js';
@@ -226,12 +226,16 @@ function teamDetailView(state) {
   state.ui = state.ui || { teamDetailTab: 'squad', selectedPlayerId: null };
   const tabs = [
     { key: 'squad', label: 'Plantilla' },
+    { key: 'lineup', label: 'Once titular' },
+    { key: 'sponsor', label: 'Patrocinio' },
     { key: 'economy', label: 'Economía' },
     { key: 'offers', label: 'Mercado' },
     { key: 'honours', label: 'Palmarés' },
   ];
   const activeTab = tabs.some((tab) => tab.key === state.ui.teamDetailTab) ? state.ui.teamDetailTab : 'squad';
   const selectedPlayer = team.squad.find((p) => p.id === state.ui.selectedPlayerId) || sorted[0] || null;
+  ensureLineupSlots(team);
+  const lineupSlots = team.lineup?.starterSlots || [];
 
   const playerRow = (player) => {
     const status = buildPlayerStatusBadge(player);
@@ -276,6 +280,48 @@ function teamDetailView(state) {
       <h3>Movimientos de mercado</h3>
       <div class="table-wrap"><table><thead><tr><th>Temp.</th><th>Operación</th><th>Jugador</th><th>Origen</th><th>Destino</th><th>Coste</th></tr></thead><tbody>
       ${marketRows.map((row) => `<tr><td>${row.season}</td><td>${row.operation || row.type}</td><td>${row.playerName || '—'}</td><td>${row.origin || row.fromTeamName || team.name}</td><td>${row.destination || row.toTeamName || team.name}</td><td>${typeof row.fee === 'number' ? money(row.fee) : typeof row.cost === 'number' ? money(row.cost) : '—'}</td></tr>`).join('') || '<tr><td colspan="6">Sin movimientos de mercado registrados.</td></tr>'}
+      </tbody></table></div>
+    </section>`;
+
+  const sponsorOffers = (team.sponsorship?.offers || []).filter((offer) => ['pending', 'rechazada', 'activa'].includes(offer.status)).slice(0, 8);
+  const activeSponsor = (team.sponsorship?.contracts || []).find((contract) => contract.id === team.sponsorship?.activeContractId && contract.status === 'active');
+  const sponsorTab = `<section class="card">
+      <h3>Patrocinio de camiseta</h3>
+      <p><strong>Patrocinador activo:</strong> ${activeSponsor ? `${activeSponsor.sponsor} (hasta T${activeSponsor.endSeason})` : 'Sin patrocinador principal'}</p>
+      <div class="table-wrap"><table><thead><tr><th>Marca</th><th>Importe</th><th>Duración</th><th>Inicio</th><th>Estado</th><th>Acción</th></tr></thead><tbody>
+      ${sponsorOffers.map((offer) => `<tr>
+        <td>${offer.sponsor}</td>
+        <td>${money(offer.amount)}/temp.</td>
+        <td>${offer.seasons}</td>
+        <td>${offer.startSeason}</td>
+        <td>${offer.status}</td>
+        <td>${offer.status === 'pending' && team.id === state.userTeamId ? `<button class="btn primary" data-action="accept-sponsor" data-team="${team.id}" data-offer="${offer.id}">Aceptar</button>
+          <button class="btn danger" data-action="reject-sponsor" data-team="${team.id}" data-offer="${offer.id}">Rechazar</button>` : '<span class="small">Gestionado</span>'}</td>
+      </tr>`).join('') || '<tr><td colspan="6">Sin ofertas nuevas.</td></tr>'}
+      </tbody></table></div>
+    </section>`;
+
+  const slotCard = (slot) => {
+    const player = team.squad.find((entry) => entry.id === slot.playerId);
+    const adaptation = Math.round((slot.adaptation || 0) * 100);
+    return `<button class="lineup-slot ${adaptation < 70 ? 'out-of-role' : ''}" data-action="select-slot" data-slot="${slot.slotId}" style="left:${slot.x}%;top:${slot.y}%;">
+      <strong>${player ? `${player.name} ${player.surname}` : 'Vacío'}</strong>
+      <span>${slot.role} · ${player ? player.position : '—'} · Ajuste ${adaptation}%</span>
+    </button>`;
+  };
+  const selectedSlot = state.ui.selectedLineupSlot || lineupSlots[0]?.slotId;
+  const lineupTab = `<section class="card">
+      <h3>Once titular y táctica</h3>
+      <div class="pitch">${lineupSlots.map(slotCard).join('')}</div>
+      <h4>Banquillo</h4>
+      <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Pos</th><th>Nivel</th><th>Acción</th></tr></thead><tbody>
+      ${(team.lineup?.bench || []).map((playerId) => {
+    const player = team.squad.find((entry) => entry.id === playerId);
+    if (!player) return '';
+    return `<tr><td>${player.name} ${player.surname}</td><td>${player.position}</td><td>${Math.round(playerScore(player))}</td><td>
+      <button class="btn" data-action="swap-lineup" data-team="${team.id}" data-slot="${selectedSlot}" data-player="${player.id}" ${selectedSlot ? '' : 'disabled'}>Entrar por slot ${selectedSlot || '—'}</button>
+    </td></tr>`;
+  }).join('') || '<tr><td colspan="4">Sin suplentes disponibles.</td></tr>'}
       </tbody></table></div>
     </section>`;
 
@@ -326,15 +372,16 @@ function teamDetailView(state) {
       <div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Nac.</th><th>Estilo</th><th>Nivel</th><th>Coste anual</th><th></th></tr></thead><tbody>
       ${freeCoaches.map((coach) => `<tr><td>${coach.name}</td><td>${coach.nationality || 'España'}</td><td>${coach.style}</td><td>${coach.rating}</td><td>${money(coach.salary || 0)}</td><td><button class="btn" data-action="hire-coach" data-team="${team.id}" data-coach="${coach.id}" ${team.coach ? 'disabled' : ''}>Contratar</button></td></tr>`).join('') || '<tr><td colspan="6">No hay técnicos libres.</td></tr>'}
       </tbody></table></div>
-      <div class="kit-row"><div><h5>Primera</h5>${kitSvg(team.kits.primary, 72)}</div><div><h5>Segunda</h5>${kitSvg(team.kits.away, 72)}</div></div>
+      <div class="kit-row"><div><h5>Primera</h5>${kitSvg(team.kits.primary, 72, team.sponsorship?.currentSponsor || '')}</div><div><h5>Segunda</h5>${kitSvg(team.kits.away, 72, team.sponsorship?.currentSponsor || '')}</div></div>
       <div class="tabs">${tabs.map((tab) => `<button class="btn ${activeTab === tab.key ? 'primary' : ''}" data-action="team-tab" data-tab="${tab.key}">${tab.label}</button>`).join('')}</div>
     </section>
-    ${activeTab === 'squad' ? squadTab : activeTab === 'economy' ? economyTab : activeTab === 'offers' ? offersTab : honoursTab}
+    ${activeTab === 'squad' ? squadTab : activeTab === 'lineup' ? lineupTab : activeTab === 'sponsor' ? sponsorTab : activeTab === 'economy' ? economyTab : activeTab === 'offers' ? offersTab : honoursTab}
   </div>`;
 }
 
 function tournamentBlock(tournament) {
   if (!tournament) return '<article class="card"><p>No disponible en esta temporada.</p></article>';
+  if (tournament.skipped) return `<article class="card"><h3>${tournament.title}</h3><p class="small">No disputada: ${tournament.skipReason}.</p></article>`;
   const roundColumn = (round) => `<div class="bracket-col"><h4>${round.round}</h4>${round.matches.map((m) => {
     const home = m.winnerId === m.homeTeamId ? `<strong>${m.homeName}</strong>` : m.homeName;
     const away = m.winnerId === m.awayTeamId ? `<strong>${m.awayName}</strong>` : m.awayName;
@@ -384,6 +431,8 @@ function cupEuropeView(state) {
       ${trophyCard(competitions.internationalSupercup.name, competitions.internationalSupercup.icon, competitions.internationalSupercup.accent, summary?.internationalSupercupWinner)}
     </div>
     <div class="grid two">
+      ${tournamentBlock(state.tournaments.supercup)}
+      ${tournamentBlock(state.tournaments.internationalSupercup)}
       ${tournamentBlock(state.tournaments.cup)}
       ${tournamentBlock(state.tournaments.champions)}
       ${tournamentBlock(state.tournaments.cupWinners)}

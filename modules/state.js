@@ -3,11 +3,11 @@ import { secondDivisionTeams } from '../data/secondDivision.js';
 import { namePools, euNationalities, nonEuNationalities } from '../data/names.js';
 import { competitions } from '../data/trophies.js';
 import { generateDoubleRoundRobin } from './scheduler.js';
-import { autoPickLineup } from './lineups.js';
+import { autoPickLineup, ensureLineupSlots } from './lineups.js';
 import { normalizeExternalLeagueData } from './europe.js';
 import { ensurePlayerStatus, computePlayerStatus } from './playerStatus.js';
 
-export const CURRENT_STATE_VERSION = 10;
+export const CURRENT_STATE_VERSION = 11;
 const START_YEAR = 2026;
 
 const squadShape = [...Array(3).fill('POR'), ...Array(8).fill('DEF'), ...Array(8).fill('MED'), ...Array(5).fill('DEL')];
@@ -73,13 +73,23 @@ function createIdentity(raw, division) {
     fanMood: 'expectante',
     supporterMomentum: 0,
     crest: {
-      shape: pick(['shield', 'round', 'diamond']),
+      shape: pick(['shield', 'round', 'diamond', 'banner', 'hex']),
       symbol: root[0]?.toUpperCase() || raw.name[0].toUpperCase(),
+      trim: pick(['#f8fafc', '#ffd166', '#c9d6ea']),
     },
     kits: {
-      primary: { pattern: pick(shirtPatterns), colors: [raw.colors[0], raw.colors[1] || '#ffffff'] },
-      away: { pattern: pick(shirtPatterns), colors: [raw.colors[1] || '#f3f4f6', raw.colors[0]] },
+      primary: { pattern: pick([...shirtPatterns, 'Chevron', 'Franja central']), colors: [raw.colors[0], raw.colors[1] || '#ffffff'] },
+      away: { pattern: pick([...shirtPatterns, 'Chevron', 'Franja central']), colors: [raw.colors[1] || '#f3f4f6', raw.colors[0]] },
     },
+  };
+}
+
+function createSponsorshipState() {
+  return {
+    offers: [],
+    contracts: [],
+    activeContractId: null,
+    currentSponsor: null,
   };
 }
 
@@ -155,6 +165,7 @@ function setupTeam(raw, idx, division) {
     seasonStats: { points: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0, gd: 0 },
     trophies: {},
     coach: createCoachProfile(),
+    sponsorship: createSponsorshipState(),
     ...createIdentity(raw, division),
   };
 
@@ -168,6 +179,7 @@ function setupTeam(raw, idx, division) {
 
   team.coach.currentTeamId = id;
   team.lineup = autoPickLineup(team, team.tactics.formation);
+  ensureLineupSlots(team);
   return team;
 }
 
@@ -191,7 +203,7 @@ export function createNewGame() {
 
   const state = {
     version: CURRENT_STATE_VERSION,
-    calendarVersion: 3,
+    calendarVersion: 4,
     season: 1,
     year: START_YEAR,
     currentMatchday: 1,
@@ -240,6 +252,8 @@ export function createNewGame() {
     tournaments: {},
     europeExternal: { leagues: [], history: [] },
     lastSeasonSummary: null,
+    supercups: { domestic: null, international: null },
+    sponsorshipMarket: { offers: [], lastSeasonGenerated: 0 },
   };
 
   sortStandings(state.firstStandings);
@@ -329,6 +343,11 @@ function enrichLegacyState(raw) {
     if (!team.financialHistory) team.financialHistory = [];
     if (!team.marketHistory) team.marketHistory = [];
     if (!team.coach) team.coach = createCoachProfile();
+    if (!team.sponsorship) team.sponsorship = createSponsorshipState();
+    team.sponsorship.offers = Array.isArray(team.sponsorship.offers) ? team.sponsorship.offers : [];
+    team.sponsorship.contracts = Array.isArray(team.sponsorship.contracts) ? team.sponsorship.contracts : [];
+    team.sponsorship.activeContractId = team.sponsorship.activeContractId || null;
+    team.sponsorship.currentSponsor = team.sponsorship.currentSponsor || null;
     if (!team.stadium || !team.kits || !team.crest) {
       const identity = createIdentity(team, team.division || 1);
       team.stadium = team.stadium || identity.stadium;
@@ -359,6 +378,7 @@ function enrichLegacyState(raw) {
       computePlayerStatus(player);
     });
   });
+  allTeams(raw).forEach((team) => ensureLineupSlots(team));
 
   const busyCoachIds = new Set(allTeams(raw).map((team) => team.coach?.id).filter(Boolean));
   raw.freeCoaches = raw.freeCoaches
@@ -375,6 +395,8 @@ function enrichLegacyState(raw) {
       salary: coach.salary || rand(450000, 4200000),
     }));
   ensureFreeCoachPool(raw, Math.max(10, Math.round(allTeams(raw).length * 0.35)));
+  raw.supercups = raw.supercups || { domestic: null, international: null };
+  raw.sponsorshipMarket = raw.sponsorshipMarket || { offers: [], lastSeasonGenerated: 0 };
 
   raw.version = CURRENT_STATE_VERSION;
   return raw;

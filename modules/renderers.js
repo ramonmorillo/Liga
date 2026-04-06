@@ -10,19 +10,24 @@ export function crestSvg(team, size = 34) {
   const c2 = team.colors?.[1] || '#e5e7eb';
   const symbol = team.crest?.symbol || team.name?.[0] || '?';
   const shape = team.crest?.shape || 'shield';
+  const trim = team.crest?.trim || '#f8fafc';
   const s = Number(size);
   const inner = s * 0.22;
 
   const body = shape === 'round'
-    ? `<circle cx="${s / 2}" cy="${s / 2}" r="${s * 0.44}" fill="${c1}"/><circle cx="${s / 2}" cy="${s / 2}" r="${s * 0.26}" fill="${c2}"/>`
+    ? `<circle cx="${s / 2}" cy="${s / 2}" r="${s * 0.45}" fill="${c1}" stroke="${trim}" stroke-width="${Math.max(2, s * 0.06)}"/><circle cx="${s / 2}" cy="${s / 2}" r="${s * 0.28}" fill="${c2}"/>`
     : shape === 'diamond'
-      ? `<polygon points="${s / 2},2 ${s - 2},${s / 2} ${s / 2},${s - 2} 2,${s / 2}" fill="${c1}"/><polygon points="${s / 2},${s * 0.16} ${s * 0.84},${s / 2} ${s / 2},${s * 0.84} ${s * 0.16},${s / 2}" fill="${c2}"/>`
-      : `<path d="M${s * 0.12} ${s * 0.06} h${s * 0.76} v${s * 0.44} c0 ${s * 0.26} -${s * 0.2} ${s * 0.42} -${s * 0.38} ${s * 0.48} -${s * 0.18} -${s * 0.06} -${s * 0.38} -${s * 0.22} -${s * 0.38} -${s * 0.48}z" fill="${c1}"/><rect x="${s * 0.22}" y="${s * 0.2}" width="${s * 0.56}" height="${s * 0.28}" fill="${c2}" rx="3"/>`;
+      ? `<polygon points="${s / 2},2 ${s - 2},${s / 2} ${s / 2},${s - 2} 2,${s / 2}" fill="${c1}" stroke="${trim}" stroke-width="${Math.max(2, s * 0.05)}"/><polygon points="${s / 2},${s * 0.18} ${s * 0.82},${s / 2} ${s / 2},${s * 0.82} ${s * 0.18},${s / 2}" fill="${c2}"/>`
+      : shape === 'banner'
+        ? `<path d="M${s * 0.1} ${s * 0.1} h${s * 0.8} v${s * 0.58} l-${s * 0.4} ${s * 0.22} l-${s * 0.4}-${s * 0.22}z" fill="${c1}" stroke="${trim}" stroke-width="${Math.max(2, s * 0.05)}"/><rect x="${s * 0.2}" y="${s * 0.26}" width="${s * 0.6}" height="${s * 0.25}" fill="${c2}" rx="3"/>`
+        : shape === 'hex'
+          ? `<polygon points="${s * 0.25},2 ${s * 0.75},2 ${s - 2},${s * 0.3} ${s * 0.75},${s - 2} ${s * 0.25},${s - 2} 2,${s * 0.3}" fill="${c1}" stroke="${trim}" stroke-width="${Math.max(2, s * 0.05)}"/><polygon points="${s * 0.3},${s * 0.22} ${s * 0.7},${s * 0.22} ${s * 0.82},${s * 0.45} ${s * 0.7},${s * 0.78} ${s * 0.3},${s * 0.78} ${s * 0.18},${s * 0.45}" fill="${c2}"/>`
+          : `<path d="M${s * 0.12} ${s * 0.06} h${s * 0.76} v${s * 0.44} c0 ${s * 0.26} -${s * 0.2} ${s * 0.42} -${s * 0.38} ${s * 0.48} -${s * 0.18} -${s * 0.06} -${s * 0.38} -${s * 0.22} -${s * 0.38} -${s * 0.48}z" fill="${c1}" stroke="${trim}" stroke-width="${Math.max(2, s * 0.05)}"/><rect x="${s * 0.22}" y="${s * 0.2}" width="${s * 0.56}" height="${s * 0.28}" fill="${c2}" rx="3"/>`;
 
   return `<svg class="crest" viewBox="0 0 ${s} ${s}" width="${s}" height="${s}" aria-label="Escudo ${team.name}">${body}<text x="50%" y="${s / 2 + inner / 2}" text-anchor="middle" fill="#0b1020" font-size="${inner}" font-weight="800">${symbol}</text></svg>`;
 }
 
-export function kitSvg(kit, size = 60) {
+export function kitSvg(kit, size = 60, sponsor = '') {
   const c1 = kit?.colors?.[0] || '#1f2937';
   const c2 = kit?.colors?.[1] || '#e5e7eb';
   const pattern = kit?.pattern || 'Liso';
@@ -31,8 +36,11 @@ export function kitSvg(kit, size = 60) {
   if (pattern === 'Rayas') deco = `<rect x="14" y="12" width="6" height="34" fill="${c2}"/><rect x="28" y="12" width="6" height="34" fill="${c2}"/><rect x="42" y="12" width="6" height="34" fill="${c2}"/>`;
   if (pattern === 'Bandas') deco = `<path d="M10 42 L50 12" stroke="${c2}" stroke-width="8"/>`;
   if (pattern === 'Mitad y mitad') deco = `<rect x="30" y="12" width="20" height="34" fill="${c2}"/>`;
+  if (pattern === 'Chevron') deco = `<path d="M14 20 L30 34 L46 20" fill="none" stroke="${c2}" stroke-width="7"/>`;
+  if (pattern === 'Franja central') deco = `<rect x="25" y="12" width="10" height="34" fill="${c2}" opacity="0.92"/>`;
+  const sponsorText = sponsor ? `<rect x="16" y="28" width="28" height="8" rx="3" fill="rgba(11,16,32,0.65)"/><text x="30" y="34" text-anchor="middle" fill="#f8fafc" font-size="4.2" font-weight="700">${String(sponsor).slice(0, 12)}</text>` : '';
 
-  return `<svg class="kit" viewBox="0 0 60 60" width="${size}" height="${size}"><path d="M12 12 L22 8 L30 14 L38 8 L48 12 L52 22 L44 25 L42 46 H18 L16 25 L8 22 Z" fill="${c1}" stroke="#0b1020" stroke-width="1.4"/>${deco}</svg>`;
+  return `<svg class="kit" viewBox="0 0 60 60" width="${size}" height="${size}"><path d="M12 12 L22 8 L30 14 L38 8 L48 12 L52 22 L44 25 L42 46 H18 L16 25 L8 22 Z" fill="${c1}" stroke="#0b1020" stroke-width="1.4"/>${deco}${sponsorText}</svg>`;
 }
 
 export function teamBadge(team) {
@@ -51,13 +59,13 @@ export function trophyCard(title, icon, accent, winner) {
 }
 
 export function matchEventIcon(type) {
-  if (type === 'goal') return '⚽';
-  if (type === 'penalty') return '🎯';
-  if (type === 'ownGoal') return '🥅';
-  if (type === 'yellow') return '🟨';
-  if (type === 'red') return '🟥';
-  if (type === 'injury') return '🩹';
-  return '•';
+  if (type === 'goal') return '<span class="event-icon goal">⚽</span>';
+  if (type === 'penalty') return '<span class="event-icon penalty">◎</span>';
+  if (type === 'ownGoal') return '<span class="event-icon own-goal">◉</span>';
+  if (type === 'yellow') return '<span class="event-icon yellow"></span>';
+  if (type === 'red') return '<span class="event-icon red"></span>';
+  if (type === 'injury') return '<span class="event-icon injury">✚</span>';
+  return '<span class="event-icon neutral">•</span>';
 }
 
 function eventLabel(event) {

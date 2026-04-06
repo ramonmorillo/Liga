@@ -1,5 +1,5 @@
 import { simulateMatch } from './matchEngine.js';
-import { autoPickLineup } from './lineups.js';
+import { autoPickLineup, ensureLineupSlots } from './lineups.js';
 import {
   sortStandings,
   getTeamById,
@@ -35,9 +35,17 @@ const continentalRoundFormat = [
   { round: 'Semifinal', slots: 2, twoLegged: true, anchors: [16, 17] },
   { round: 'Final', slots: 1, twoLegged: false, anchors: [20] },
 ];
+const supercupRoundFormat = [
+  { round: 'Final', slots: 1, twoLegged: false, anchors: [1] },
+];
+const internationalSupercupRoundFormat = [
+  { round: 'Final', slots: 1, twoLegged: false, anchors: [2] },
+];
 const PRIZE_AMOUNTS = {
   league: 100000000,
   cup: 50000000,
+  supercup: 15000000,
+  internationalSupercup: 25000000,
   champions: 500000000,
   internationalSecondary: 200000000,
   promotion: 25000000,
@@ -47,8 +55,12 @@ const TOURNAMENT_ALIASES = {
   champions: ['champions', 'championsCup', 'europeChampions'],
   cupWinners: ['cupWinners', 'cup_winners', 'europeCupWinners'],
   continental2: ['continental2', 'continental', 'europe'],
+  supercup: ['supercup', 'domesticSupercup'],
+  internationalSupercup: ['internationalSupercup', 'intSupercup'],
 };
 const TOURNAMENT_SPECS = {
+  supercup: { key: 'supercup', title: 'Supercopa Nacional', type: 'supercup', roundFormat: supercupRoundFormat, requiredFromSeason: 2, slots: 2 },
+  internationalSupercup: { key: 'internationalSupercup', title: 'Supercopa Internacional', type: 'supercup', roundFormat: internationalSupercupRoundFormat, requiredFromSeason: 2, slots: 2 },
   cup: { key: 'cup', title: 'Copa Nacional', type: 'cup', roundFormat: cupRoundFormat, requiredFromSeason: 1, slots: 16 },
   champions: { key: 'champions', title: 'Copa de Campeones', type: 'international', roundFormat: euroRoundFormat, requiredFromSeason: 2, slots: 8 },
   cupWinners: { key: 'cupWinners', title: 'Copa de Campeones de Copa', type: 'international', roundFormat: euroRoundFormat, requiredFromSeason: 2, slots: 8 },
@@ -87,6 +99,97 @@ function registerFinancialEvent(state, team, payload) {
   state.history.financialEvents = state.history.financialEvents || [];
   state.history.financialEvents.unshift(event);
   state.history.financialEvents = state.history.financialEvents.slice(0, 600);
+}
+
+const SPONSOR_NAMES = [
+  'NovaCola', 'IberiaTech', 'Solarix', 'MetroBank', 'AeroPulse', 'KronoWear',
+  'Triton Mobile', 'VitaPro', 'NexoCloud', 'Altamar Seguros', 'Lynx Energy', 'Orbital Foods',
+];
+
+function ensureSponsorshipState(state) {
+  state.sponsorshipMarket = state.sponsorshipMarket || { offers: [], lastSeasonGenerated: 0 };
+  allTeams(state).forEach((team) => {
+    team.sponsorship = team.sponsorship || { offers: [], contracts: [], activeContractId: null, currentSponsor: null };
+    team.sponsorship.offers = Array.isArray(team.sponsorship.offers) ? team.sponsorship.offers : [];
+    team.sponsorship.contracts = Array.isArray(team.sponsorship.contracts) ? team.sponsorship.contracts : [];
+  });
+}
+
+function createSponsorOffer(state, team) {
+  const sponsor = SPONSOR_NAMES[Math.floor(Math.random() * SPONSOR_NAMES.length)];
+  const years = Math.random() < 0.42 ? 1 : Math.random() < 0.75 ? 2 : 3;
+  const amount = Math.round((1800000 + team.prestige * 240000 + team.strength * 170000) * (0.85 + Math.random() * 0.5));
+  const offer = {
+    id: `sponsor-${state.season}-${team.id}-${Math.random().toString(36).slice(2, 7)}`,
+    teamId: team.id,
+    sponsor,
+    amount,
+    seasons: years,
+    startSeason: state.season,
+    status: 'pending',
+  };
+  team.sponsorship.offers.unshift(offer);
+  state.sponsorshipMarket.offers.unshift(offer);
+  team.sponsorship.offers = team.sponsorship.offers.slice(0, 12);
+  state.sponsorshipMarket.offers = state.sponsorshipMarket.offers.slice(0, 220);
+  return offer;
+}
+
+function autoResolveSponsorOffer(state, team, offer) {
+  const active = team.sponsorship.contracts.find((contract) => contract.id === team.sponsorship.activeContractId && contract.status === 'active');
+  const activeAnnual = active ? active.amount : 0;
+  const accept = !active || offer.amount >= Math.round(activeAnnual * 1.08);
+  if (accept) acceptSponsorOffer(state, team.id, offer.id, { byAi: true });
+  else rejectSponsorOffer(state, team.id, offer.id);
+}
+
+function expireSponsorships(state) {
+  allTeams(state).forEach((team) => {
+    ensureSponsorshipState(state);
+    (team.sponsorship.contracts || []).forEach((contract) => {
+      if (contract.status !== 'active') return;
+      if (state.season > contract.endSeason) {
+        contract.status = 'finalizada';
+        if (team.sponsorship.activeContractId === contract.id) {
+          team.sponsorship.activeContractId = null;
+          team.sponsorship.currentSponsor = null;
+        }
+      }
+    });
+  });
+}
+
+function generateSponsorshipOffers(state) {
+  ensureSponsorshipState(state);
+  if (state.sponsorshipMarket.lastSeasonGenerated === state.season) return;
+  expireSponsorships(state);
+  allTeams(state).forEach((team) => {
+    const active = team.sponsorship.contracts.find((contract) => contract.id === team.sponsorship.activeContractId && contract.status === 'active');
+    if (active && active.endSeason - state.season >= 1) return;
+    const offer = createSponsorOffer(state, team);
+    if (team.id !== state.userTeamId) autoResolveSponsorOffer(state, team, offer);
+  });
+  state.sponsorshipMarket.lastSeasonGenerated = state.season;
+}
+
+function payRecurringSponsorships(state) {
+  ensureSponsorshipState(state);
+  allTeams(state).forEach((team) => {
+    const contract = team.sponsorship.contracts.find((entry) => entry.id === team.sponsorship.activeContractId && entry.status === 'active');
+    if (!contract) return;
+    if (state.season < contract.startSeason || state.season > contract.endSeason) return;
+    const ledgerId = `S${state.season}:sponsor-cycle:${team.id}:${contract.id}`;
+    if (team.financialHistory?.some((entry) => entry.id === ledgerId)) return;
+    team.budget += contract.amount;
+    team.finances.prizes += contract.amount;
+    registerFinancialEvent(state, team, {
+      id: ledgerId,
+      type: 'sponsorship',
+      amount: contract.amount,
+      text: `Cobro anual patrocinio (${contract.sponsor})`,
+      meta: { sponsor: contract.sponsor, contractId: contract.id },
+    });
+  });
 }
 
 function grantPrizeOnce(state, team, amount, typeKey, text, meta = {}) {
@@ -156,6 +259,10 @@ function createTournamentTemplate(key, title, roundFormat, participants) {
     participants,
     championTeamId: null,
     championName: null,
+    runnerUpName: null,
+    finalScore: null,
+    skipped: false,
+    skipReason: null,
     currentRound: roundFormat[0]?.round || null,
     rounds: roundFormat.map((entry) => ({
       round: entry.round,
@@ -196,6 +303,7 @@ function shuffled(list) {
 function mapCompetitionLabel(event) {
   if (event.competitionId === 'league') return 'Liga';
   if (event.competitionId === 'cup') return 'Copa';
+  if (event.type === 'supercup') return 'Supercopa';
   return 'Internacional';
 }
 
@@ -204,9 +312,41 @@ function buildSeasonCalendar(state) {
   state.leagueMatchdays = leagueRounds;
 
   const entries = [];
+  if (state.season > 1) {
+    entries.push({
+      anchor: 1,
+      order: 0,
+      event: {
+        id: `S${state.season}-supercup-final`,
+        season: state.season,
+        type: 'supercup',
+        competitionId: 'supercup',
+        round: 'Final',
+        leg: 1,
+        status: 'pending',
+        matches: [],
+        label: 'Supercopa Nacional',
+      },
+    });
+    entries.push({
+      anchor: 2,
+      order: 0,
+      event: {
+        id: `S${state.season}-internationalSupercup-final`,
+        season: state.season,
+        type: 'supercup',
+        competitionId: 'internationalSupercup',
+        round: 'Final',
+        leg: 1,
+        status: 'pending',
+        matches: [],
+        label: 'Supercopa Internacional',
+      },
+    });
+  }
   for (let round = 1; round <= leagueRounds; round += 1) {
     entries.push({
-      anchor: round,
+      anchor: round + 2,
       order: 0,
       event: {
         id: `S${state.season}-L${round}`,
@@ -259,11 +399,11 @@ function buildSeasonCalendar(state) {
   state.currentMatchday = Math.min(state.currentMatchday, state.maxMatchday);
   state.seasonCalendar = events;
   state.selectedCalendarWeek = Math.min(state.selectedCalendarWeek || 1, state.maxMatchday);
-  state.calendarVersion = 3;
+  state.calendarVersion = 4;
 }
 
 function priorityByType(type) {
-  return type === 'league' ? 0 : type === 'cup' ? 1 : type === 'international' ? 2 : 3;
+  return type === 'supercup' ? 0 : type === 'league' ? 1 : type === 'cup' ? 2 : type === 'international' ? 3 : 4;
 }
 
 function normalizeCupParticipants(participants, slots = 16) {
@@ -283,6 +423,40 @@ function updateRoundDatesFromCalendar(state, tournament) {
 }
 
 function deriveTournamentParticipants(state, key) {
+  const previousSeason = state.season - 1;
+  const previousGlobal = (state.history?.globalBySeason || []).find((entry) => entry.season === previousSeason);
+  const finalD1 = (state.history?.finalStandingsBySeason || []).find((entry) => entry.season === previousSeason)?.d1 || [];
+  const leagueChampionName = previousGlobal?.leagueChampion || null;
+  const cupChampionName = previousGlobal?.cupChampion || null;
+  const resolveByName = (name) => state.firstDivision.find((team) => team.name === name) || state.secondDivision.find((team) => team.name === name) || null;
+
+  if (key === 'supercup') {
+    if (!leagueChampionName || !cupChampionName) return [];
+    const leagueChampion = resolveByName(leagueChampionName);
+    let opponent = resolveByName(cupChampionName);
+    if (leagueChampion && opponent && leagueChampion.id === opponent.id) {
+      const runnerUp = finalD1.find((row) => row.position === 2);
+      opponent = runnerUp ? getTeamById(state, runnerUp.teamId) : null;
+    }
+    if (!leagueChampion || !opponent || leagueChampion.id === opponent.id) return [];
+    return [
+      { id: leagueChampion.id, name: leagueChampion.name },
+      { id: opponent.id, name: opponent.name },
+    ];
+  }
+
+  if (key === 'internationalSupercup') {
+    const champsWinner = (state.history?.internationalPalmares?.champions || []).find((entry) => entry.season === previousSeason)?.champion;
+    const cupWinnersWinner = (state.history?.internationalPalmares?.cupWinners || []).find((entry) => entry.season === previousSeason)?.champion;
+    if (!champsWinner || !cupWinnersWinner) return [];
+    const resolveIntlRef = (name) => {
+      const domestic = resolveByName(name);
+      if (domestic) return { id: domestic.id, name: domestic.name };
+      return { id: `ext:legacy-${name.toLowerCase().replace(/\s+/g, '-')}`, name };
+    };
+    return [resolveIntlRef(champsWinner), resolveIntlRef(cupWinnersWinner)];
+  }
+
   if (key === 'cup') {
     return normalizeCupParticipants(state.firstDivision.map((team) => ({ id: team.id, name: team.name })), 16);
   }
@@ -377,8 +551,31 @@ function ensureTournamentInventory(state) {
       if (!tournament.participants.length) tournament.participants = deriveTournamentParticipants(state, spec.key);
     }
 
+    if (spec.type === 'supercup' && tournament.participants.length < 2) {
+      tournament.skipped = true;
+      tournament.skipReason = tournament.participants.length === 1
+        ? 'Solo hay un campeón válido de la temporada anterior'
+        : 'No hay campeones válidos de la temporada anterior';
+      tournament.rounds.forEach((round) => {
+        round.done = true;
+        round.matches = [];
+        round.winners = [];
+      });
+    } else {
+      tournament.skipped = false;
+      tournament.skipReason = null;
+    }
+
     ensureTournamentCalendarEvents(state, spec.key);
     updateRoundDatesFromCalendar(state, tournament);
+    if (tournament.skipped) {
+      (state.seasonCalendar || [])
+        .filter((event) => event.competitionId === spec.key)
+        .forEach((event) => {
+          event.status = 'idle';
+          event.matches = [];
+        });
+    }
   });
 }
 
@@ -413,7 +610,7 @@ function dedupeAndFreezeInternationalPalmares(state) {
 }
 
 function rebuildSeasonCompetitionState(state, { forceCalendar = false } = {}) {
-  const needsCalendar = forceCalendar || !Array.isArray(state.seasonCalendar) || !state.seasonCalendar.length || !state.seasonCalendar[0]?.type || state.calendarVersion !== 3;
+  const needsCalendar = forceCalendar || !Array.isArray(state.seasonCalendar) || !state.seasonCalendar.length || !state.seasonCalendar[0]?.type || state.calendarVersion !== 4;
   if (needsCalendar) buildSeasonCalendar(state);
   setupSeasonTournaments(state);
   repairInternationalCalendarState(state);
@@ -887,6 +1084,11 @@ function playTournamentEvent(state, tournament, dateEvent) {
   if (round.winners.length === 1) {
     tournament.championTeamId = round.winners[0].id;
     tournament.championName = round.winners[0].name;
+    const finalMatch = round.matches[0];
+    if (finalMatch) {
+      tournament.runnerUpName = finalMatch.winnerId === finalMatch.homeTeamId ? finalMatch.awayName : finalMatch.homeName;
+      tournament.finalScore = finalMatch.leg1?.score || null;
+    }
     if (tournament.key === 'cup') {
       state.cup = state.cup || {};
       state.cup.championTeamId = tournament.championTeamId;
@@ -956,6 +1158,8 @@ function assignSeasonPrizeMoney(state, summary, promotedTeams = []) {
   const prizeEvents = [];
   const leagueChampion = getTeamById(state, state.firstStandings[0]?.teamId);
   const cupChampion = getTeamById(state, getTournament(state, 'cup')?.championTeamId);
+  const supercupWinner = getTeamById(state, getTournament(state, 'supercup')?.championTeamId);
+  const internationalSupercupWinner = getTeamById(state, getTournament(state, 'internationalSupercup')?.championTeamId);
   const championsWinner = getTeamById(state, getTournament(state, 'champions')?.championTeamId);
   const cupWinnersWinner = getTeamById(state, getTournament(state, 'cupWinners')?.championTeamId);
   const continentalWinner = getTeamById(state, getTournament(state, 'continental2')?.championTeamId);
@@ -963,6 +1167,8 @@ function assignSeasonPrizeMoney(state, summary, promotedTeams = []) {
   const pushIf = (event) => { if (event) prizeEvents.push(event); };
   pushIf(grantPrizeOnce(state, leagueChampion, PRIZE_AMOUNTS.league, 'league-title', 'ganar la Liga', { competition: 'league' }));
   pushIf(grantPrizeOnce(state, cupChampion, PRIZE_AMOUNTS.cup, 'cup-title', 'ganar la Copa Nacional', { competition: 'cup' }));
+  pushIf(grantPrizeOnce(state, supercupWinner, PRIZE_AMOUNTS.supercup, 'supercup-title', 'ganar la Supercopa Nacional', { competition: 'supercup' }));
+  pushIf(grantPrizeOnce(state, internationalSupercupWinner, PRIZE_AMOUNTS.internationalSupercup, 'international-supercup-title', 'ganar la Supercopa Internacional', { competition: 'internationalSupercup' }));
   pushIf(grantPrizeOnce(state, championsWinner, PRIZE_AMOUNTS.champions, 'international-champions', 'ganar la Copa de Campeones', { competition: 'champions' }));
   pushIf(grantPrizeOnce(state, cupWinnersWinner, PRIZE_AMOUNTS.internationalSecondary, 'international-cupwinners', 'ganar la Copa de Campeones de Copa', { competition: 'cupWinners' }));
   pushIf(grantPrizeOnce(state, continentalWinner, PRIZE_AMOUNTS.internationalSecondary, 'international-continental2', 'ganar la Copa Continental', { competition: 'continental2' }));
@@ -1004,6 +1210,7 @@ function validateInternationalEditionForHistory(state, key) {
   const tournament = getTournament(state, key);
   const spec = getTournamentSpec(key);
   if (!spec || state.season < spec.requiredFromSeason) return { shouldRegister: false };
+  if (tournament?.skipped) return { shouldRegister: false };
   if (!tournament?.championTeamId || !tournament?.championName) {
     throw new Error(`Competición ${spec.title} sin campeón resuelto en temporada ${state.season}.`);
   }
@@ -1051,7 +1258,8 @@ function storeSeasonFinalStandings(state) {
 function requiredTournaments(state) {
   return Object.values(TOURNAMENT_SPECS)
     .filter((spec) => state.season >= spec.requiredFromSeason)
-    .map((spec) => ({ key: spec.key, exists: true }));
+    .map((spec) => ({ key: spec.key, exists: true }))
+    .filter(({ key }) => !getTournament(state, key)?.skipped);
 }
 
 function isTournamentResolved(tournament) {
@@ -1074,7 +1282,7 @@ function resolvePendingTournamentEvents(state) {
   });
 
   const pendingEvents = (state.seasonCalendar || [])
-    .filter((event) => event.status !== 'completed' && (event.type === 'cup' || event.type === 'international'))
+    .filter((event) => event.status !== 'completed' && (event.type === 'cup' || event.type === 'international' || event.type === 'supercup'))
     .sort((a, b) => a.dateIndex - b.dateIndex || priorityByType(a.type) - priorityByType(b.type));
 
   pendingEvents.forEach((event) => {
@@ -1105,6 +1313,8 @@ function finalizeSeason(state) {
   const secondChampion = getTeamById(state, state.secondStandings[0]?.teamId);
 
   const cup = getTournament(state, 'cup');
+  const supercup = getTournament(state, 'supercup');
+  const internationalSupercup = getTournament(state, 'internationalSupercup');
   const champions = getTournament(state, 'champions');
   const cupWinners = getTournament(state, 'cupWinners');
   const continental2 = getTournament(state, 'continental2');
@@ -1119,6 +1329,8 @@ function finalizeSeason(state) {
     leagueChampion: firstChampion.name,
     secondDivisionChampion: secondChampion?.name || 'Pendiente',
     cupChampion: cup?.championName || 'Pendiente',
+    supercupWinner: supercup?.championName || (supercup?.skipped ? 'No disputada' : 'Pendiente'),
+    internationalSupercupWinner: internationalSupercup?.championName || (internationalSupercup?.skipped ? 'No disputada' : 'Pendiente'),
     championsWinner: state.season > 1 ? (champions?.championName || 'Pendiente') : 'No disputada',
     cupWinnersWinner: state.season > 1 ? (cupWinners?.championName || 'Pendiente') : 'No disputada',
     continental2Winner: state.season > 1 ? (continental2?.championName || 'Pendiente') : 'No disputada',
@@ -1135,7 +1347,7 @@ function finalizeSeason(state) {
   assignSeasonPrizeMoney(state, summary, promoted);
   storeSeasonFinalStandings(state);
 
-  ['champions', 'cupWinners', 'continental2'].forEach((competitionKey) => {
+  ['supercup', 'internationalSupercup', 'champions', 'cupWinners', 'continental2'].forEach((competitionKey) => {
     const validation = validateInternationalEditionForHistory(state, competitionKey);
     if (!validation.shouldRegister) return;
     const { runnerUpName, finalScore } = runnerUpAndScoreFromFinal(validation.finalMatch, validation.tournament.championTeamId);
@@ -1152,6 +1364,8 @@ function finalizeSeason(state) {
   registerTeamTitle(state, firstChampion.id, 'league', state.season);
   if (state.secondStandings[0]?.teamId) registerTeamTitle(state, state.secondStandings[0].teamId, 'league2', state.season);
   if (cup?.championTeamId) registerTeamTitle(state, cup.championTeamId, 'cup', state.season);
+  if (supercup?.championTeamId && !String(supercup.championTeamId).startsWith('ext:')) registerTeamTitle(state, supercup.championTeamId, 'supercup', state.season);
+  if (internationalSupercup?.championTeamId && !String(internationalSupercup.championTeamId).startsWith('ext:')) registerTeamTitle(state, internationalSupercup.championTeamId, 'internationalSupercup', state.season);
   if (champions?.championTeamId && !String(champions.championTeamId).startsWith('ext:')) registerTeamTitle(state, champions.championTeamId, 'champions', state.season);
   if (cupWinners?.championTeamId && !String(cupWinners.championTeamId).startsWith('ext:')) registerTeamTitle(state, cupWinners.championTeamId, 'cupWinners', state.season);
   if (continental2?.championTeamId && !String(continental2.championTeamId).startsWith('ext:')) registerTeamTitle(state, continental2.championTeamId, 'continental2', state.season);
@@ -1214,6 +1428,8 @@ function finalizeSeason(state) {
   sortStandings(state.secondStandings);
 
   rebuildSeasonCompetitionState(state, { forceCalendar: true });
+  payRecurringSponsorships(state);
+  generateSponsorshipOffers(state);
   archivePlayers(state);
 }
 
@@ -1310,11 +1526,18 @@ function simulateDateByEvent(state, event, allReports) {
     return;
   }
 
+  if (event.type === 'supercup') {
+    playTournamentEvent(state, getTournament(state, event.competitionId), event);
+    event.status = hasEventPlayableDetail(state, event) ? 'completed' : 'idle';
+    return;
+  }
+
   event.status = 'idle';
 }
 
 export function simulateMatchday(state) {
   ensureSeasonSetup(state);
+  ensureSponsorshipState(state);
   repairStuckSeasonTransition(state);
   resolveAiCoachVacancies(state);
   if (state.currentMatchday > state.maxMatchday) return { done: true, message: 'Temporada ya finalizada' };
@@ -1322,6 +1545,7 @@ export function simulateMatchday(state) {
   tickInjuries(state);
   allTeams(state).forEach((team) => {
     if (!team.lineup?.starters?.length) team.lineup = autoPickLineup(team, team.tactics.formation);
+    ensureLineupSlots(team);
   });
 
   const dayEvents = listDateEvents(state, state.currentMatchday);
@@ -1357,6 +1581,55 @@ export function simulateMatchday(state) {
 
   const labels = activeEvent ? mapCompetitionLabel(activeEvent) : '';
   return { done: false, message: `Fecha ${simulatedDate} simulada (${labels || 'sin competición'})`, summary: matchdaySummary };
+}
+
+export function acceptSponsorOffer(state, teamId, offerId, { byAi = false } = {}) {
+  ensureSponsorshipState(state);
+  const team = getTeamById(state, teamId);
+  if (!team) return { ok: false, message: 'Equipo no encontrado' };
+  const offer = team.sponsorship.offers.find((entry) => entry.id === offerId);
+  if (!offer || offer.status !== 'pending') return { ok: false, message: 'Oferta no disponible' };
+
+  const current = team.sponsorship.contracts.find((contract) => contract.id === team.sponsorship.activeContractId && contract.status === 'active');
+  if (current) current.status = 'finalizada';
+
+  offer.status = 'aceptada';
+  const contract = {
+    id: `contract-${offer.id}`,
+    sponsor: offer.sponsor,
+    amount: offer.amount,
+    startSeason: offer.startSeason,
+    endSeason: offer.startSeason + offer.seasons - 1,
+    seasons: offer.seasons,
+    status: 'active',
+    sourceOfferId: offer.id,
+  };
+  team.sponsorship.contracts.unshift(contract);
+  team.sponsorship.activeContractId = contract.id;
+  team.sponsorship.currentSponsor = contract.sponsor;
+  offer.status = 'activa';
+
+  team.budget += contract.amount;
+  team.finances.prizes += contract.amount;
+  registerFinancialEvent(state, team, {
+    id: `S${state.season}:sponsor:${team.id}:${contract.id}`,
+    type: 'sponsorship',
+    amount: contract.amount,
+    text: `Ingreso de patrocinio principal (${contract.sponsor})`,
+    meta: { sponsor: contract.sponsor, seasons: contract.seasons, byAi },
+  });
+  addNews(state, 'economy', `${team.name} firma con ${contract.sponsor} por ${Math.round(contract.amount / 1000000)}M€ por temporada.`, 'media');
+  return { ok: true, message: `Patrocinio aceptado: ${contract.sponsor}`, contract };
+}
+
+export function rejectSponsorOffer(state, teamId, offerId) {
+  ensureSponsorshipState(state);
+  const team = getTeamById(state, teamId);
+  if (!team) return { ok: false, message: 'Equipo no encontrado' };
+  const offer = team.sponsorship.offers.find((entry) => entry.id === offerId);
+  if (!offer || offer.status !== 'pending') return { ok: false, message: 'Oferta no disponible' };
+  offer.status = 'rechazada';
+  return { ok: true, message: 'Oferta rechazada' };
 }
 
 export function dismissCoach(state, teamId) {
@@ -1436,6 +1709,9 @@ export function hireCoach(state, teamId, coachId) {
 
 export function initializeSeasonStructures(state) {
   ensureSeasonSetup(state);
+  ensureSponsorshipState(state);
+  payRecurringSponsorships(state);
+  generateSponsorshipOffers(state);
   repairStuckSeasonTransition(state);
   ensureFreeCoachPool(state, Math.max(10, Math.round(allTeams(state).length * 0.35)));
   resolveAiCoachVacancies(state);
