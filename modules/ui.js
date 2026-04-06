@@ -1,9 +1,10 @@
 import { competitions, getCompetitionTrophy, resolveCompetitionKey } from '../data/trophies.js';
-import { FORMATIONS, ensureLineupSlots, playerScore } from './lineups.js';
+import { FORMATIONS, ensureLineupSlots, getCoachTacticalFit, playerScore } from './lineups.js';
 import { getTeamOffers, isPlayerMarketEligible, isTransferWindowOpen } from './transfers.js';
 import { money, matchCard, positionNames, standingsTable, teamBadge, trophyCard, crestSvg, kitSvg, matchEventIcon } from './renderers.js';
 import { buildPlayerStatusBadge, computePlayerStatus, ensurePlayerStatus } from './playerStatus.js';
 import { contractSeasonsLeft, getTeamById } from './state.js';
+import { ensureSpecificPosition } from './positions.js';
 
 export const views = {
   dashboard: 'dashboard',
@@ -220,6 +221,7 @@ function teamsView(state) {
 function teamDetailView(state) {
   const team = getTeamById(state, state.selectedTeamId || state.userTeamId);
   if (!team) return '<section class="card"><p>Equipo no encontrado.</p></section>';
+  team.squad.forEach((player) => ensureSpecificPosition(player, team.id));
 
   const sorted = [...team.squad].sort((a, b) => b.overall - a.overall);
   const avgAttendance = team.stadium.seasonHomeMatches ? Math.round(team.stadium.seasonAttendanceTotal / team.stadium.seasonHomeMatches) : 0;
@@ -242,13 +244,14 @@ function teamDetailView(state) {
   const lineupSlots = team.lineup?.starterSlots || [];
 
   const playerRow = (player) => {
+    ensureSpecificPosition(player, team.id);
     const status = buildPlayerStatusBadge(player);
     const contractLeft = contractSeasonsLeft(player, state.year);
     const releaseAllowed = team.squad.length > 18 && player.form <= 64;
     return `<tr>
       <td><button class="btn" data-action="player-detail" data-player="${player.id}">${player.name} ${player.surname}</button></td>
       <td>${status.icon} ${status.label}</td>
-      <td>${positionNames[player.position]}</td>
+      <td>${player.specificPosition || player.position}</td>
       <td>${player.age}</td>
       <td>${player.nationality}</td>
       <td>${player.overall}</td>
@@ -269,7 +272,7 @@ function teamDetailView(state) {
 
   const squadTab = `<section class="card">
       <h3>Plantilla</h3>
-      ${selectedPlayer ? `<div class="player-focus"><strong>${selectedPlayer.name} ${selectedPlayer.surname}</strong><span class="tag">${selectedStatus.icon} ${selectedStatus.label}</span><span class="small">Posición ${positionNames[selectedPlayer.position]} · Valor ${money(selectedPlayer.value)}</span></div>` : ''}
+      ${selectedPlayer ? `<div class="player-focus"><strong>${selectedPlayer.name} ${selectedPlayer.surname}</strong><span class="tag">${selectedStatus.icon} ${selectedStatus.label}</span><span class="small">Posición ${selectedPlayer.specificPosition || selectedPlayer.position} (${positionNames[selectedPlayer.position]}) · Valor ${money(selectedPlayer.value)}</span></div>` : ''}
       <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Estado</th><th>Pos</th><th>Edad</th><th>Nac.</th><th>Med</th><th>Pot</th><th>Contrato</th><th>Restante</th><th>E/F/M</th><th>Goles</th><th>Acciones</th></tr></thead><tbody>
       ${sorted.map(playerRow).join('')}
       </tbody></table></div>
@@ -310,20 +313,49 @@ function teamDetailView(state) {
     const adaptation = Math.round((slot.adaptation || 0) * 100);
     return `<button class="lineup-slot ${adaptation < 70 ? 'out-of-role' : ''}" data-action="select-slot" data-slot="${slot.slotId}" style="left:${slot.x}%;top:${slot.y}%;">
       <strong>${player ? `${player.name} ${player.surname}` : 'Vacío'}</strong>
-      <span>${slot.role} · ${player ? player.position : '—'} · Ajuste ${adaptation}%</span>
+      <span>${slot.role} · ${player ? (player.specificPosition || player.position) : '—'} · Ajuste ${adaptation}%</span>
     </button>`;
   };
+  const getSwapComparison = (slotId, incomingId) => {
+    const slot = lineupSlots.find((entry) => entry.slotId === slotId);
+    const outgoing = team.squad.find((entry) => entry.id === slot?.playerId);
+    const incoming = team.squad.find((entry) => entry.id === incomingId);
+    if (!outgoing || !incoming) return '';
+    const outgoingStatus = buildPlayerStatusBadge(outgoing);
+    const incomingStatus = buildPlayerStatusBadge(incoming);
+    return `<div class="swap-compare">
+      <strong>Comparativa cambio</strong>
+      <div><span>Sale:</span> ${outgoing.name} ${outgoing.surname} · ${outgoing.specificPosition || outgoing.position} · Pot ${outgoing.potential} · ${outgoingStatus.label} · Energía ${outgoing.energy}</div>
+      <div><span>Entra:</span> ${incoming.name} ${incoming.surname} · ${incoming.specificPosition || incoming.position} · Pot ${incoming.potential} · ${incomingStatus.label} · Energía ${incoming.energy}</div>
+    </div>`;
+  };
+  const coachFit = getCoachTacticalFit(team, team.lineup);
   const selectedSlot = state.ui.selectedLineupSlot || lineupSlots[0]?.slotId;
   const lineupTab = `<section class="card">
       <h3>Once titular y táctica</h3>
-      <div class="pitch">${lineupSlots.map(slotCard).join('')}</div>
+      <p class="small">Ajuste entrenador: <strong>${Math.round(coachFit.fit * 100)}%</strong> · Impacto ${coachFit.penalty < 1 ? 'penalización' : 'bonificación'} x${coachFit.penalty.toFixed(2)} · ${coachFit.reason}</p>
+      <div class="pitch">
+        <div class="pitch-zone defensive"></div>
+        <div class="pitch-zone middle"></div>
+        <div class="pitch-zone attack"></div>
+        <div class="center-circle"></div>
+        <div class="center-spot"></div>
+        <div class="box top"></div>
+        <div class="goal-box top"></div>
+        <div class="box bottom"></div>
+        <div class="goal-box bottom"></div>
+        <div class="goal top"></div>
+        <div class="goal bottom"></div>
+        ${lineupSlots.map(slotCard).join('')}
+      </div>
       <h4>Banquillo</h4>
       <div class="table-wrap"><table><thead><tr><th>Jugador</th><th>Pos</th><th>Nivel</th><th>Acción</th></tr></thead><tbody>
       ${(team.lineup?.bench || []).map((playerId) => {
     const player = team.squad.find((entry) => entry.id === playerId);
     if (!player) return '';
-    return `<tr><td>${player.name} ${player.surname}</td><td>${player.position}</td><td>${Math.round(playerScore(player))}</td><td>
+    return `<tr><td>${player.name} ${player.surname}</td><td>${player.specificPosition || player.position}</td><td>${Math.round(playerScore(player))}</td><td>
       <button class="btn" data-action="swap-lineup" data-team="${team.id}" data-slot="${selectedSlot}" data-player="${player.id}" ${selectedSlot ? '' : 'disabled'}>Entrar por slot ${selectedSlot || '—'}</button>
+      ${selectedSlot ? getSwapComparison(selectedSlot, player.id) : ''}
     </td></tr>`;
   }).join('') || '<tr><td colspan="4">Sin suplentes disponibles.</td></tr>'}
       </tbody></table></div>
@@ -345,7 +377,7 @@ function teamDetailView(state) {
     const bestAmount = Math.round(player.value * 1.08);
     return `<tr>
           <td>${player.name} ${player.surname}</td>
-          <td>${positionNames[player.position]}</td>
+          <td>${player.specificPosition || player.position}</td>
           <td>${player.age}</td>
           <td>${money(player.value)}</td>
           <td>Hasta ${player.contractEndYear || '—'}</td>
@@ -573,6 +605,23 @@ function endSeasonView(state) {
   </section>`;
 }
 
+function leagueScorersBlock(state, division = 1) {
+  const teams = division === 1 ? state.firstDivision : state.secondDivision;
+  const rows = teams
+    .flatMap((team) => team.squad.map((player) => ({ player, team })))
+    .filter(({ player }) => (player.leagueGoals || 0) > 0 || (player.leagueMatches || 0) > 0)
+    .sort((a, b) => (b.player.leagueGoals || 0) - (a.player.leagueGoals || 0)
+      || (a.player.leagueMatches || 99) - (b.player.leagueMatches || 99)
+      || b.player.overall - a.player.overall)
+    .slice(0, 10);
+  return `<section class="card">
+    <h3>Trofeo máximo goleador (${division === 1 ? 'Primera' : 'Segunda'})</h3>
+    <div class="table-wrap"><table><thead><tr><th>#</th><th>Jugador</th><th>Equipo</th><th>Goles</th><th>PJ</th><th>Prom.</th></tr></thead><tbody>
+      ${rows.map(({ player, team }, index) => `<tr><td>${index + 1}</td><td>${player.name} ${player.surname}</td><td>${team.name}</td><td>${player.leagueGoals || 0}</td><td>${player.leagueMatches || 0}</td><td>${player.leagueMatches ? (player.leagueGoals / player.leagueMatches).toFixed(2) : '0.00'}</td></tr>`).join('') || '<tr><td colspan="6">Sin goleadores todavía.</td></tr>'}
+    </tbody></table></div>
+  </section>`;
+}
+
 export function render(root, app) {
   const teamsById = Object.fromEntries([...app.state.firstDivision, ...app.state.secondDivision].map((team) => [team.id, team]));
   const viewMap = {
@@ -580,8 +629,8 @@ export function render(root, app) {
     [views.calendar]: calendarView(app.state),
     [views.matchday]: matchdayView(app.state),
     [views.matchDetail]: matchDetailView(app.state),
-    [views.standings1]: `<section class="card"><h2>Primera División</h2>${standingsTable(app.state.firstStandings, teamsById)}</section>`,
-    [views.standings2]: `<section class="card"><h2>Segunda División</h2>${standingsTable(app.state.secondStandings, teamsById)}</section>`,
+    [views.standings1]: `<div class="grid"><section class="card"><h2>Primera División</h2>${standingsTable(app.state.firstStandings, teamsById)}</section>${leagueScorersBlock(app.state, 1)}</div>`,
+    [views.standings2]: `<div class="grid"><section class="card"><h2>Segunda División</h2>${standingsTable(app.state.secondStandings, teamsById)}</section>${leagueScorersBlock(app.state, 2)}</div>`,
     [views.teams]: teamsView(app.state),
     [views.teamDetail]: teamDetailView(app.state),
     [views.cupNational]: cupNationalView(app.state),

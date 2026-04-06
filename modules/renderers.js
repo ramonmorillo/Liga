@@ -1,4 +1,20 @@
-export const positionNames = { POR: 'Portero', DEF: 'Defensa', MED: 'Centrocampista', DEL: 'Delantero' };
+export const positionNames = {
+  POR: 'Portero',
+  DEF: 'Defensa',
+  MED: 'Centrocampista',
+  DEL: 'Delantero',
+  LI: 'Lateral izquierdo',
+  LD: 'Lateral derecho',
+  DFC: 'Defensa central',
+  MCD: 'Mediocentro defensivo',
+  MC: 'Mediocentro',
+  MCO: 'Mediapunta',
+  EI: 'Extremo izquierdo',
+  ED: 'Extremo derecho',
+  DC: 'Delantero centro',
+  CAI: 'Carrilero izquierdo',
+  CAD: 'Carrilero derecho',
+};
 
 export function money(value) {
   return `€${Math.round(value).toLocaleString('es-ES')}`;

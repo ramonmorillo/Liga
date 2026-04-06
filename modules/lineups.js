@@ -1,4 +1,5 @@
 import { ensurePlayerStatus } from './playerStatus.js';
+import { ensureSpecificPosition, generalFromSpecific } from './positions.js';
 
 export const FORMATIONS = {
   '4-3-3': { POR: 1, DEF: 4, MED: 3, DEL: 3 },
@@ -68,7 +69,10 @@ function getLayout(formation) {
 
 function roleCompatibility(player, slot) {
   if (!player || !slot) return 0.4;
-  if (player.position === slot.position) return 1;
+  ensureSpecificPosition(player);
+  if (player.specificPosition === slot.role) return 1;
+  if (player.position === slot.position) return 0.9;
+  if (generalFromSpecific(player.specificPosition) === slot.position) return 0.86;
   if (slot.position === 'MED' && player.position === 'DEL') return 0.78;
   if (slot.position === 'DEL' && player.position === 'MED') return 0.82;
   if (slot.position === 'DEF' && player.position === 'MED') return 0.68;
@@ -138,6 +142,7 @@ export function swapLineupPlayer(team, slotId, incomingPlayerId) {
   if (ensurePlayerStatus(incoming).injuryGamesRemaining > 0) return { ok: false, message: 'Jugador lesionado' };
 
   const currentStarterId = slot.playerId;
+  const outgoing = team.squad.find((player) => player.id === currentStarterId);
   const occupiedSlot = lineup.starterSlots.find((entry) => entry.playerId === incomingPlayerId);
   if (occupiedSlot) occupiedSlot.playerId = currentStarterId;
   slot.playerId = incomingPlayerId;
@@ -150,7 +155,13 @@ export function swapLineupPlayer(team, slotId, incomingPlayerId) {
     .slice(0, 9)
     .map((player) => player.id);
 
-  return { ok: true, message: 'Cambio aplicado', adaptation: slot.adaptation };
+  return {
+    ok: true,
+    message: 'Cambio aplicado',
+    adaptation: slot.adaptation,
+    outgoingPlayerId: outgoing?.id || null,
+    incomingPlayerId: incoming.id,
+  };
 }
 
 export function lineupStrength(team, lineup) {
@@ -161,4 +172,31 @@ export function lineupStrength(team, lineup) {
 
 export function playerScore(player) {
   return player.overall * 0.62 + player.form * 0.18 + player.energy * 0.12 + player.morale * 0.08;
+}
+
+export function getCoachTacticalFit(team, lineup = team?.lineup) {
+  if (!team || !lineup) return { fit: 0.75, penalty: 1, reason: 'Sin datos' };
+  if (!team.coach) return { fit: 0.5, penalty: 0.86, reason: 'Sin entrenador' };
+
+  const preferredByStyle = {
+    'posesión ofensiva': ['4-3-3', '4-2-3-1'],
+    'bloque medio': ['4-4-2', '4-2-3-1'],
+    'pressing intenso': ['4-3-3', '3-5-2'],
+    'transiciones rápidas': ['4-4-2', '3-5-2'],
+    'defensa táctica': ['4-4-2', '3-5-2'],
+  };
+  const style = team.coach.style || 'bloque medio';
+  const preferred = preferredByStyle[style] || ['4-3-3'];
+  const formationFit = preferred.includes(lineup.formation) ? 1 : 0.8;
+  const slots = lineup.starterSlots || [];
+  const adaptationFit = slots.length ? slots.reduce((sum, slot) => sum + (slot.adaptation || 0), 0) / slots.length : 0.86;
+  const cohesion = Math.min(1.02, Math.max(0.85, 0.88 + (team.coach.rating || 70) / 700));
+  const fit = Math.max(0.55, Math.min(1.02, formationFit * 0.5 + adaptationFit * 0.5));
+  const penalty = Math.max(0.82, Math.min(1.04, fit * cohesion));
+  const reason = formationFit < 0.9
+    ? 'Esquema lejos del estilo del entrenador'
+    : adaptationFit < 0.78
+      ? 'Alineación poco adaptada a los roles'
+      : 'Alineación alineada con el entrenador';
+  return { fit, penalty, reason };
 }
