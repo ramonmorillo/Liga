@@ -1,4 +1,4 @@
-import { lineupStrength } from './lineups.js';
+import { getCoachTacticalFit, lineupStrength } from './lineups.js';
 
 const styleMap = {
   Posesión: { attack: 1.05, control: 1.12 },
@@ -16,10 +16,13 @@ const ri = (min, max) => Math.floor(r(min, max + 1));
 function buildMetrics(team, lineup, homeFactor = 1) {
   const style = styleMap[team.style] || styleMap.Transiciones;
   const line = lineupStrength(team, lineup);
+  const coachFit = getCoachTacticalFit(team, lineup);
+  const noCoachPenalty = team.coach ? 1 : 0.86;
   return {
-    rating: line * 0.64 + team.strength * 0.22 + team.prestige * 0.14,
-    attack: style.attack * homeFactor,
-    control: style.control,
+    rating: (line * 0.64 + team.strength * 0.22 + team.prestige * 0.14) * coachFit.penalty * noCoachPenalty,
+    attack: style.attack * homeFactor * coachFit.penalty,
+    control: style.control * coachFit.penalty,
+    coachFit,
   };
 }
 
@@ -122,10 +125,31 @@ function pickMvp(homeTeam, awayTeam, allEvents) {
 
 function makeAttendance(homeTeam, awayTeam, competitionLabel = 'Liga') {
   const moodFactor = { eufórica: 1.13, contenta: 1.06, expectante: 1, inquieta: 0.92, enfadada: 0.84, 'muy enfadada': 0.76 };
-  const rivalry = homeTeam.colors[0] === awayTeam.colors[0] ? 1.08 : 1;
-  const prestigeBoost = 0.82 + (homeTeam.prestige + awayTeam.prestige) / 220;
-  const competitionBoost = competitionLabel === 'Liga' ? 1 : 1.12;
-  const expected = homeTeam.stadium.capacity * prestigeBoost * rivalry * competitionBoost * (moodFactor[homeTeam.fanMood] || 1) * r(0.86, 1.01);
+  const byName = (team) => String(team.name || '').toLowerCase().split(/\s+/).filter((x) => x.length > 3);
+  const nameRivalry = byName(homeTeam).some((token) => byName(awayTeam).includes(token)) ? 1.08 : 1;
+  const colorRivalry = homeTeam.colors?.[0] === awayTeam.colors?.[0] ? 1.04 : 1;
+  const rivalry = nameRivalry * colorRivalry;
+  const prestigeBoost = 0.7 + (homeTeam.prestige + awayTeam.prestige) / 240;
+  const competitionBoost = competitionLabel.includes('Liga') ? 1 : 1.14;
+  const positionContext = typeof homeTeam._matchContext?.homeStanding === 'number'
+    ? 1 + Math.max(0, 8 - homeTeam._matchContext.homeStanding) * 0.018
+    : 1;
+  const rivalQuality = 0.95 + (awayTeam.strength / 200);
+  const seasonalMoment = homeTeam._matchContext?.matchday && homeTeam._matchContext?.maxMatchday
+    ? 0.92 + (homeTeam._matchContext.matchday / homeTeam._matchContext.maxMatchday) * 0.18
+    : 1;
+  const bigMatchBoost = homeTeam._matchContext?.isBigMatch ? 1.1 : 1;
+  const expected = homeTeam.stadium.capacity
+    * 0.62
+    * prestigeBoost
+    * rivalry
+    * competitionBoost
+    * positionContext
+    * rivalQuality
+    * seasonalMoment
+    * bigMatchBoost
+    * (moodFactor[homeTeam.fanMood] || 1)
+    * r(0.9, 1.04);
   const attendance = Math.max(3500, Math.min(homeTeam.stadium.capacity, Math.round(expected)));
   const occupancy = Math.round((attendance / homeTeam.stadium.capacity) * 100);
   return { attendance, occupancy };
@@ -137,6 +161,8 @@ function describeMatch(homeTeam, awayTeam, result) {
 }
 
 export function simulateMatch(homeTeam, awayTeam, homeLineup, awayLineup, context = {}) {
+  homeTeam._matchContext = context;
+  awayTeam._matchContext = context;
   const home = buildMetrics(homeTeam, homeLineup, 1.08);
   const away = buildMetrics(awayTeam, awayLineup, 1);
   const diff = (home.rating - away.rating) / 19;
@@ -169,6 +195,8 @@ export function simulateMatch(homeTeam, awayTeam, homeLineup, awayLineup, contex
   const events = [...homeEvents, ...awayEvents].sort((a, b) => minuteValue(a.minute) - minuteValue(b.minute));
   const mvp = pickMvp(homeTeam, awayTeam, events);
   const attendance = makeAttendance(homeTeam, awayTeam, context.competitionLabel || 'Liga');
+  delete homeTeam._matchContext;
+  delete awayTeam._matchContext;
 
   return {
     homeGoals,

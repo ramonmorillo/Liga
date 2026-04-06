@@ -618,7 +618,7 @@ function rebuildSeasonCompetitionState(state, { forceCalendar = false } = {}) {
   dedupeAndFreezeInternationalPalmares(state);
 }
 
-function applyResult(standings, homeTeam, awayTeam, result) {
+function applyResult(standings, homeTeam, awayTeam, result, homeLineup = null, awayLineup = null) {
   const home = standings.find((row) => row.teamId === homeTeam.id);
   const away = standings.find((row) => row.teamId === awayTeam.id);
 
@@ -670,7 +670,18 @@ function applyResult(standings, homeTeam, awayTeam, result) {
   result.goals.forEach((event) => {
     const team = event.side === 'home' ? homeTeam : awayTeam;
     const player = team.squad.find((item) => item.id === event.playerId);
-    if (player) player.seasonGoals += 1;
+    if (player) {
+      player.seasonGoals += 1;
+      player.leagueGoals = (player.leagueGoals || 0) + 1;
+    }
+  });
+  [homeLineup, awayLineup].forEach((lineup, idx) => {
+    if (!lineup?.starters?.length) return;
+    const team = idx === 0 ? homeTeam : awayTeam;
+    lineup.starters.forEach((playerId) => {
+      const player = team.squad.find((item) => item.id === playerId);
+      if (player) player.leagueMatches = (player.leagueMatches || 0) + 1;
+    });
   });
 
   homeTeam.stadium.lastAttendance = result.attendance.attendance;
@@ -786,7 +797,20 @@ function playLeagueDate(state, dateEvent, divisionKey) {
     if (!homeTeam.lineup?.starters?.length) homeTeam.lineup = autoPickLineup(homeTeam, homeTeam.tactics.formation);
     if (!awayTeam.lineup?.starters?.length) awayTeam.lineup = autoPickLineup(awayTeam, awayTeam.tactics.formation);
 
-    const result = simulateMatch(homeTeam, awayTeam, homeTeam.lineup, awayTeam.lineup, { competitionLabel: 'Liga' });
+    const homeStanding = standings.find((row) => row.teamId === homeTeam.id)?.position || null;
+    const awayStanding = standings.find((row) => row.teamId === awayTeam.id)?.position || null;
+    const isBigMatch = Boolean(
+      (homeStanding && awayStanding && homeStanding <= 6 && awayStanding <= 6)
+      || Math.abs(homeTeam.prestige - awayTeam.prestige) <= 8,
+    );
+    const result = simulateMatch(homeTeam, awayTeam, homeTeam.lineup, awayTeam.lineup, {
+      competitionLabel: 'Liga',
+      matchday: dateEvent.matchday,
+      maxMatchday: state.leagueMatchdays || state.firstSchedule.length,
+      homeStanding,
+      awayStanding,
+      isBigMatch,
+    });
     applyMatchInjuries(homeTeam, awayTeam, result.injuries);
     const record = createMatchRecord(state, {
       dateIndex: dateEvent.dateIndex,
@@ -802,7 +826,7 @@ function playLeagueDate(state, dateEvent, divisionKey) {
     });
 
     state.results[divisionKey][dateEvent.matchday][key] = { ...result, matchId: record.id };
-    applyResult(standings, homeTeam, awayTeam, result);
+    applyResult(standings, homeTeam, awayTeam, result, homeTeam.lineup, awayTeam.lineup);
     dateEvent.matches.push(record.id);
 
     report.push({
@@ -1122,6 +1146,28 @@ function registerMatchdaySummary(state, allReports) {
   return summary;
 }
 
+function getLeagueTopScorerTable(state, division = 1, limit = 10) {
+  const teams = division === 1 ? state.firstDivision : state.secondDivision;
+  const rows = teams
+    .flatMap((team) => team.squad.map((player) => ({ player, team })))
+    .filter(({ player }) => (player.leagueGoals || 0) > 0)
+    .sort((a, b) => (b.player.leagueGoals || 0) - (a.player.leagueGoals || 0)
+      || (b.player.leagueMatches || 0) - (a.player.leagueMatches || 0)
+      || b.player.overall - a.player.overall)
+    .slice(0, limit)
+    .map(({ player, team }, idx) => ({
+      position: idx + 1,
+      playerId: player.id,
+      teamId: team.id,
+      playerName: `${player.name} ${player.surname}`,
+      teamName: team.name,
+      goals: player.leagueGoals || 0,
+      matches: player.leagueMatches || 0,
+      ratio: player.leagueMatches ? Number((player.leagueGoals / player.leagueMatches).toFixed(2)) : 0,
+    }));
+  return rows;
+}
+
 function computeEuropeSlots(state, cupChampionId) {
   const taken = new Set();
   const fromLeague = (pos) => {
@@ -1322,6 +1368,7 @@ function finalizeSeason(state) {
   computeEuropeSlots(state, cup?.championTeamId);
 
   const awards = getSeasonAwards(state);
+  const leagueTopScorers = getLeagueTopScorerTable(state, 1, 10);
 
   const summary = {
     season: state.season,
@@ -1386,6 +1433,14 @@ function finalizeSeason(state) {
     pichichi: awards.pichichi,
     zamora: awards.zamora,
   });
+  state.history.leagueTopScorerWinners = state.history.leagueTopScorerWinners || [];
+  if (leagueTopScorers[0]) {
+    state.history.leagueTopScorerWinners.push({
+      season: state.season,
+      year: state.year,
+      ...leagueTopScorers[0],
+    });
+  }
 
   pushSeasonHistory(state, summary);
   if (!state.history.seasons.some((entry) => entry.season === summary.season)) {

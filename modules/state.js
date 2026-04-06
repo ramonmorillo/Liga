@@ -6,8 +6,9 @@ import { generateDoubleRoundRobin } from './scheduler.js';
 import { autoPickLineup, ensureLineupSlots } from './lineups.js';
 import { normalizeExternalLeagueData } from './europe.js';
 import { ensurePlayerStatus, computePlayerStatus } from './playerStatus.js';
+import { createSpecificPosition, ensureSpecificPosition } from './positions.js';
 
-export const CURRENT_STATE_VERSION = 11;
+export const CURRENT_STATE_VERSION = 12;
 const START_YEAR = 2026;
 
 const squadShape = [...Array(3).fill('POR'), ...Array(8).fill('DEF'), ...Array(8).fill('MED'), ...Array(5).fill('DEL')];
@@ -109,6 +110,7 @@ function createPlayer(teamId, idx, position, base, nonEuRemaining, age = rand(17
     age,
     nationality,
     position,
+    specificPosition: createSpecificPosition(position, `${teamId}-${idx}-${Date.now()}`),
     overall,
     potential,
     form: rand(60, 90),
@@ -118,6 +120,8 @@ function createPlayer(teamId, idx, position, base, nonEuRemaining, age = rand(17
     clause,
     nonEu: isNonEu,
     seasonGoals: 0,
+    leagueGoals: 0,
+    leagueMatches: 0,
     seasonConceded: 0,
     contractEndYear: createContractEndYear(currentYear),
     history: { seasons: 0, clubs: [], goals: 0, titles: [] },
@@ -245,6 +249,7 @@ export function createNewGame() {
       financialEvents: [],
       internationalPalmares: {},
       finalStandingsBySeason: [],
+      leagueTopScorerWinners: [],
     },
     prizeLedger: {},
     europeSlots: { champions: [], cupWinners: [], continental2: [] },
@@ -331,6 +336,7 @@ function enrichLegacyState(raw) {
   raw.history.financialEvents = raw.history.financialEvents || [];
   raw.history.internationalPalmares = raw.history.internationalPalmares || {};
   raw.history.finalStandingsBySeason = raw.history.finalStandingsBySeason || [];
+  raw.history.leagueTopScorerWinners = raw.history.leagueTopScorerWinners || [];
   raw.prizeLedger = raw.prizeLedger || {};
   raw.tournaments = raw.tournaments || {};
   raw.europeExternal = raw.europeExternal || { leagues: [], history: [] };
@@ -374,6 +380,9 @@ function enrichLegacyState(raw) {
       if (typeof player.previousOverall !== 'number') player.previousOverall = player.overall;
       if (typeof player.previousForm !== 'number') player.previousForm = player.form;
       if (typeof player.previousMorale !== 'number') player.previousMorale = player.morale;
+      ensureSpecificPosition(player, team.id);
+      if (typeof player.leagueGoals !== 'number') player.leagueGoals = 0;
+      if (typeof player.leagueMatches !== 'number') player.leagueMatches = 0;
       ensurePlayerStatus(player);
       computePlayerStatus(player);
     });
@@ -426,6 +435,8 @@ export function resetSeasonStats(team) {
 
   team.squad.forEach((player) => {
     player.seasonGoals = 0;
+    player.leagueGoals = 0;
+    player.leagueMatches = 0;
     player.seasonConceded = 0;
     player.energy = rand(76, 100);
     player.form = Math.min(100, Math.max(50, player.form + rand(-6, 6)));
